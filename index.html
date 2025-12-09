@@ -4,16 +4,17 @@
   <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1, shrink-to-fit=no">
+    <meta http-equiv="X-UA-Compatible" content="IE=edge">
     <title>MarkPaper</title>
     <meta name="description" content="MarkPaper - Markdown to Clean Paper">
     <!-- Favicon -->
-    <link rel="apple-touch-icon" sizes="180x180" href="/apple-touch-icon.png">
-    <link rel="icon" type="image/png" sizes="32x32" href="/favicon-32x32.png">
-    <link rel="icon" type="image/png" sizes="16x16" href="/favicon-16x16.png">
-    <link rel="manifest" href="/site.webmanifest">
+    <link rel="apple-touch-icon" sizes="180x180" href="assets/apple-touch-icon.png">
+    <link rel="icon" type="image/png" sizes="32x32" href="assets/favicon-32x32.png">
+    <link rel="icon" type="image/png" sizes="16x16" href="assets/favicon-16x16.png">
+    <link rel="manifest" href="assets/site.webmanifest">
     <!-- MarkPaper -->
-    <link rel="stylesheet" href="./markpaper.css">
-    <script src="markpaper.js"></script>
+    <link rel="stylesheet" href="css/markpaper.css">
+    <script src="js/markpaper.js"></script>
     <!-- Prism (Code highlighting) -->
     <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/prism-themes/1.9.0/prism-ghcolors.min.css">
     <script src="https://cdnjs.cloudflare.com/ajax/libs/prism/1.29.0/components/prism-core.min.js"></script>
@@ -24,9 +25,19 @@
   </head>
 
   <body>
-    <article id="content">
-      <div class="loading-state">Loading...</div>
-    </article>
+    <main>
+      <article id="content">
+        <div class="loading-state">
+          <div class="spinner"></div>
+          <p>Loading document...</p>
+        </div>
+      </article>
+    </main>
   </body>
+  <noscript>
+    <div class="alert alert-warning">
+      <strong>Warning:</strong> JavaScript is required to run MarkPaper. Please enable it in your browser settings.
+    </div>
+  </noscript>
 
 </html>
