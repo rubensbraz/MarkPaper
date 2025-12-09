@@ -844,8 +844,27 @@ class SettingsController {
     this.applyPrefs();
   }
 
+  /**
+   * Applies the current preferences to the CSS variables and handles external theme switching.
+   */
   applyPrefs() {
     const root = document.documentElement;
+
+    // Detect if Dark Mode is active based on background color
+    const isDark = this.prefs['--background-color'] === '#1a1a1a';
+
+    // Toggle a class on body for specific CSS overrides
+    document.body.classList.toggle('theme-dark', isDark);
+
+    // Dynamic PrismJS Theme Switching
+    const prismLink = document.getElementById('prism-theme-link');
+    if (prismLink) {
+      const lightThemeUrl = 'https://cdnjs.cloudflare.com/ajax/libs/prism-themes/1.9.0/prism-ghcolors.min.css';
+      const darkThemeUrl = 'https://cdnjs.cloudflare.com/ajax/libs/prism-themes/1.9.0/prism-atom-dark.min.css';
+      prismLink.href = isDark ? darkThemeUrl : lightThemeUrl;
+    }
+
+    // Apply CSS Variables
     for (const [key, value] of Object.entries(this.prefs)) {
       if (key === '--current-font-family') {
         let stack = value;
