@@ -921,11 +921,12 @@ h6:hover .heading-anchor {
 
 .table-of-contents li {
     border-bottom: 1px solid var(--border-color);
+    margin-bottom: 0px !important;
 }
 
 .table-of-contents a {
     display: block;
-    padding: 15px 20px;
+    padding: 20px 20px;
     color: var(--text-color);
     text-decoration: none;
     transition: all 0.3s ease;

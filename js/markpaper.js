@@ -953,7 +953,7 @@ class MarkPaperUI {
    */
   setupToc() {
     // Select both H2 and H3
-    const headings = document.querySelectorAll('h2, h3');
+    const headings = document.querySelectorAll('#content h2, #content h3');
     this.dom.toc.innerHTML = '';
 
     headings.forEach((h, i) => {
@@ -985,7 +985,7 @@ class MarkPaperUI {
 
   /** Highlights the current section in the TOC while scrolling. */
   setupScrollSpy() {
-    const headings = document.querySelectorAll('h2, h3');
+    const headings = document.querySelectorAll('#content h2, #content h3');
     const links = this.dom.toc.querySelectorAll('a');
 
     if (headings.length === 0) return;
