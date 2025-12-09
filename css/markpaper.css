@@ -9,7 +9,7 @@
     --font-monospace: Consolas, Monaco, "Courier New", monospace;
     --font-system: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
 
-    /* Dynamic Settings Defaults (Controlled by JS) */
+    /* Dynamic Settings (Controlled by JS) */
     --current-font-family: var(--font-serif);
     --font-base-size: 16px;
 
@@ -18,18 +18,16 @@
     --background-color: #FFFFFF;
     --accent-color: #4a6a70;
 
-    /* Interface Colors (Dynamic) */
+    /* Interface Colors (Default Light Mode) */
     --border-color: #e9ecef;
     --modal-header-bg: #f8f9fa;
     --light-gray-color: #f8f9fa;
     --code-background: #f8f9fa;
 
-    /* Derived Colors */
+    /* Derived Colors (Automatic Calculations) */
     --accent-hover-color: color-mix(in srgb, var(--accent-color), white 20%);
     --accent-visited-color: color-mix(in srgb, var(--accent-color), black 20%);
     --blockquote-border: var(--accent-color);
-
-    /* Semantic Colors */
     --secondary-text-color: color-mix(in srgb, var(--text-color), transparent 40%);
     --muted-text-color: color-mix(in srgb, var(--text-color), transparent 60%);
     --button-text-color: #495057;
@@ -46,8 +44,10 @@
     --menu-background: var(--background-color);
     --menu-border: var(--border-color);
     --menu-line-color: var(--text-color);
+    --menu-border-hover: var(--text-color);
+    --menu-background-active: var(--background-color);
 
-    /* GitHub Alert Colors */
+    /* Alert Colors (GitHub Style) */
     --alert-note-border: #5889b7;
     --alert-note-bg: #eef5fc;
     --alert-warning-border: #b78d48;
@@ -70,7 +70,7 @@
     --copy-btn-success-bg: #5f9a6f;
     --copy-btn-success-color: white;
 
-    /* Typography Logic */
+    /* Layout Units */
     --baseline-unit: 1.75rem;
 }
 
@@ -91,7 +91,7 @@ html {
 body {
     font-size: clamp(1rem, 2.5vw, 1rem);
     line-height: 1.75;
-    max-width: 38em;
+    max-width: 40em;
     margin: auto;
     color: var(--text-color);
     background-color: var(--background-color);
@@ -192,6 +192,7 @@ p:first-of-type:first-letter {
     line-height: 1;
 }
 
+/* Inline Elements */
 strong,
 b {
     font-weight: 600;
@@ -258,6 +259,7 @@ a:hover {
    4. LAYOUT COMPONENTS
    ------------------------------------------------------------------ */
 
+/* Document Metadata Header */
 .document-header {
     text-align: center;
     margin-bottom: calc(var(--baseline-unit) * 2);
@@ -295,6 +297,7 @@ a:hover {
     font-style: italic;
 }
 
+/* Lists */
 ul,
 ol {
     margin-left: clamp(0.5rem, 2vw, 1rem);
@@ -330,6 +333,7 @@ li li {
     margin-bottom: calc(var(--baseline-unit) * 0.25);
 }
 
+/* Ordered List Counters */
 ol {
     list-style: none;
     counter-reset: level1;
@@ -378,6 +382,7 @@ ol ol ol li::before {
     min-width: 4em;
 }
 
+/* Blockquotes */
 blockquote {
     margin: var(--baseline-unit) 0;
     padding: calc(var(--baseline-unit) * 0.75) 1.5em;
@@ -401,6 +406,7 @@ blockquote p:last-child {
     margin-bottom: 0;
 }
 
+/* Images & Media */
 img,
 video {
     height: auto;
@@ -443,6 +449,7 @@ hr {
     width: 50%;
 }
 
+/* Code Blocks */
 code,
 kbd,
 samp {
@@ -530,6 +537,7 @@ code[class*="language-"] {
     border-color: var(--copy-btn-success-bg);
 }
 
+/* Tables */
 table {
     width: 100%;
     border-collapse: collapse;
@@ -593,6 +601,11 @@ table code {
     border-radius: 3px;
 }
 
+/* ------------------------------------------------------------------
+   5. EXTENDED COMPONENTS (Alerts, Footnotes, Footer)
+   ------------------------------------------------------------------ */
+
+/* GitHub Alerts */
 .alert {
     margin: var(--baseline-unit) 0;
     padding: var(--baseline-unit);
@@ -652,6 +665,7 @@ table code {
     padding: 0.15em 0.3em;
 }
 
+/* Alert Variations */
 .alert-note {
     border-left-color: var(--alert-note-border);
     background-color: var(--alert-note-bg);
@@ -697,6 +711,7 @@ table code {
     color: var(--alert-caution-border);
 }
 
+/* Footnotes */
 .footnotes {
     margin-top: 2rem;
     margin-left: clamp(0.5rem, 2vw, 1rem);
@@ -728,6 +743,7 @@ table code {
     border-bottom: none;
 }
 
+/* Footer */
 .markpaper-footer {
     margin-top: calc(var(--baseline-unit) * 3);
     padding: calc(var(--baseline-unit) * 1) 0;
@@ -762,7 +778,7 @@ table code {
 }
 
 /* ------------------------------------------------------------------
-   9. NEW FEATURES
+   6. UI CONTROLS & OVERLAY (Menu, Settings, TOC)
    ------------------------------------------------------------------ */
 
 .reading-progress {
@@ -947,6 +963,7 @@ h6:hover .heading-anchor {
     visibility: visible;
 }
 
+/* Settings Modal */
 .settings-modal {
     position: fixed;
     top: 80px;
@@ -1074,6 +1091,10 @@ h6:hover .heading-anchor {
     color: #dc3545;
     border-color: #f5c6cb;
 }
+
+/* ------------------------------------------------------------------
+   7. MEDIA QUERIES
+   ------------------------------------------------------------------ */
 
 @media (max-width: 575.98px) {
     body {

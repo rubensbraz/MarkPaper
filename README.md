@@ -406,7 +406,7 @@ MIT License
 
 ## Author
 
-[TetsuakiBaba](https://github.com/TetsuakiBaba)
+[Tetsuaki Baba](https://github.com/TetsuakiBaba)
 
 ## Development Notes
 
@@ -426,5 +426,5 @@ This project aims to implement a simple and lightweight Markdown parser with ele
 - [x] ~~Document metadata support~~ (Completed)
 - [x] ~~Safe HTML tag support~~ (Completed)
 - [x] ~~Mathematical notation support~~ (Completed)
-- [ ] ~~Dark mode support~~ (Completed)
+- [x] ~~Dark mode support~~ (Completed)
 - [ ] Print style optimization
