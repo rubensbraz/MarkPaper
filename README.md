@@ -1,7 +1,7 @@
 # MarkPaper
 
-author: Tetsuaki Baba
-date: 2025-07-19
+author: Tetsuaki Baba / Rubens Braz
+date: 2025-07-19. Atualization in 2025-12-12
 institution: Tokyo Metropolitan University
 
 To create beautiful documents, all you need is to write Markdown text. MarkPaper is a tool that generates beautiful HTML documents suitable for academic papers and technical documents using a custom Markdown parser. It provides rich features including a hamburger menu with table of contents, footnote system, GitHub-style alerts, code blocks, and more.
@@ -16,18 +16,47 @@ You can see the demo of MarkPaper at [MarkPaper Demo](https://tetsuakibaba.githu
 
 ```html
 <!DOCTYPE html>
-<html lang="ja">
-<head>
+<html lang="en">
+
+  <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1, shrink-to-fit=no">
+    <meta http-equiv="X-UA-Compatible" content="IE=edge">
     <title>MarkPaper</title>
-    <link rel="stylesheet" href="https://cdn.jsdelivr.net/gh/TetsuakiBaba/MarkPaper/markpaper.css">
-</head>
-<body>
-    <article id="content">Loading...</article>
-    <script src="https://cdn.jsdelivr.net/gh/TetsuakiBaba/MarkPaper/markpaper.js" crossorigin="anonymous"
-        type="text/javascript"></script>
-</body>
+    <meta name="description" content="MarkPaper - Markdown to Clean Paper">
+    <!-- Favicon -->
+    <link rel="apple-touch-icon" sizes="180x180" href="assets/apple-touch-icon.png">
+    <link rel="icon" type="image/png" sizes="32x32" href="assets/favicon-32x32.png">
+    <link rel="icon" type="image/png" sizes="16x16" href="assets/favicon-16x16.png">
+    <link rel="manifest" href="assets/site.webmanifest">
+    <!-- MarkPaper -->
+    <link rel="stylesheet" href="css/markpaper.css">
+    <script src="js/markpaper.js"></script>
+    <!-- Prism (Code highlighting) -->
+    <link id="prism-theme-link" rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/prism-themes/1.9.0/prism-ghcolors.min.css">
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/prism/1.29.0/components/prism-core.min.js"></script>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/prism/1.29.0/plugins/autoloader/prism-autoloader.min.js"></script>
+    <!-- KaTeX (LaTeX parser) -->
+    <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/katex@0.16.9/dist/katex.min.css">
+    <script src="https://cdn.jsdelivr.net/npm/katex@0.16.9/dist/katex.min.js"></script>
+  </head>
+
+  <body>
+    <main>
+      <article id="content">
+        <div class="loading-state">
+          <div class="spinner"></div>
+          <p>Loading document...</p>
+        </div>
+      </article>
+    </main>
+  </body>
+  <noscript>
+    <div class="alert alert-warning">
+      <strong>Warning:</strong> JavaScript is required to run MarkPaper. Please enable it in your browser settings.
+    </div>
+  </noscript>
+
 </html>
 ```
 
@@ -131,6 +160,94 @@ email: john@example.com
   - Ordered item 2-1
   - Ordered item 2-2
 
+## Syntax Highlighting
+
+Code blocks are automatically highlighted using **Prism.js**.
+
+### JavaScript
+
+```javascript
+// A simple recursive function
+function calculateFactorial(n) {
+  if (n === 0 || n === 1) {
+    return 1;
+  }
+  return n * calculateFactorial(n - 1);
+}
+
+console.log(calculateFactorial(5)); // Output: 120
+```
+
+### Python
+
+```python
+class NeuralNetwork:
+    def __init__(self, inputs, hidden, outputs):
+        self.inputs = inputs
+        self.hidden = hidden
+        self.outputs = outputs
+
+    def train(self):
+        print("Training model...")
+```
+
+### CSS
+
+```css
+/* Custom styles for the container */
+.container {
+    display: flex;
+    justify-content: center;
+    align-items: center;
+    background-color: #f0f0f0;
+}
+```
+
+
+### Text Styles
+
+You can use **bold text** for emphasis, *italic text* for nuance, and ~~strikethrough~~ for deletions. You can also mark text like <mark>this highlighted section</mark> using safe HTML tags.
+
+### Links & References
+
+- **Standard Link:** [Visit the Project Repository](https://github.com/TetsuakiBaba/MarkPaper)
+- **Auto-link:** [https://www.w3.org/](https://www.w3.org/)
+- **Footnote Reference:** This statement requires a citation[^1] to be valid.
+
+## Mathematical Notation (LaTeX)
+
+MarkPaper uses **KaTeX** to render high-quality mathematics.
+
+### Inline Math
+
+Mathematical concepts can be embedded directly in the text.
+For example, the mass-energy equivalence is denoted as $E = mc^2$, and Euler's identity is $e^{i\pi} + 1 = 0$.
+
+### Block Math
+
+Complex equations are rendered in display mode, centered and scrollable if necessary.
+
+**The Gaussian Integral:**
+$$
+\int_{-\infty}^\infty e^{-x^2} dx = \sqrt{\pi}
+$$
+
+**Quadratic Formula:**
+$$
+x = \frac{-b \pm \sqrt{b^2 - 4ac}}{2a}
+$$
+
+**Matrix Example:**
+$$
+M = \begin{pmatrix}
+1 & 0 & 0 \\
+0 & \cos \theta & -\sin \theta \\
+0 & \sin \theta & \cos \theta
+\end{pmatrix}
+$$
+
+
+
 ### Extended Syntax
 
 #### Footnotes
@@ -205,17 +322,23 @@ https://example.com
 
 #### Tables
 
+Tables are styled for academic data presentation with hover effects.
+
 ```markdown
-| Header 1 | Header 2 |
-|----------|----------|
-| Cell 1   | Cell 2   |
-| Cell 3   | Cell 4   |
+| Metric | Experiment A | Experiment B | Change |
+| :--- | :---: | :---: | ---: |
+| Accuracy | 92.5% | 94.8% | +2.3% |
+| Loss | 0.35 | 0.21 | -0.14 |
+| Epochs | 50 | 75 | +25 |
+| Status | **Stable** | *Testing* | N/A |
 ```
 
-| Header 1 | Header 2 |
-|----------|----------|
-| Cell 1   | Cell 2   |
-| Cell 3   | Cell 4   |
+| Metric | Experiment A | Experiment B | Change |
+| :--- | :---: | :---: | ---: |
+| Accuracy | 92.5% | 94.8% | +2.3% |
+| Loss | 0.35 | 0.21 | -0.14 |
+| Epochs | 50 | 75 | +25 |
+| Status | **Stable** | *Testing* | N/A |
 
 **Features:**
 
@@ -226,45 +349,54 @@ https://example.com
 
 #### GitHub-style Alerts
 
+GitHub-style alerts are supported for emphasizing specific content.
+
 ```markdown
 > [!NOTE]
-> This is an information note.
-> Can be written in multiple lines.
-
-> [!WARNING]
-> This is a warning message.
-
-> [!IMPORTANT]
-> This is important information.
+> This is a general note to the reader. Useful for non-critical information.
 
 > [!TIP]
-> This is a helpful tip.
+> **Pro Tip:** You can use the circular hamburger menu in the top right to navigate via the Table of Contents.
+
+> [!IMPORTANT]
+> The rendering engine sanitizes HTML tags to prevent XSS attacks while allowing safe formatting.
+
+> [!WARNING]
+> Please ensure your Markdown file is encoded in UTF-8 to avoid character display issues.
 
 > [!CAUTION]
-> This requires caution.
+> Deleting the `markpaper.js` file will stop the rendering engine completely.
 ```
 
 > [!NOTE]
-> This is an information note.
-> Can be written in multiple lines.
-
-> [!WARNING]
-> This is a warning message.
-
-> [!IMPORTANT]
-> This is important information.
+> This is a general note to the reader. Useful for non-critical information.
 
 > [!TIP]
-> This is a helpful tip.
+> **Pro Tip:** You can use the circular hamburger menu in the top right to navigate via the Table of Contents.
+
+> [!IMPORTANT]
+> The rendering engine sanitizes HTML tags to prevent XSS attacks while allowing safe formatting.
+
+> [!WARNING]
+> Please ensure your Markdown file is encoded in UTF-8 to avoid character display issues.
 
 > [!CAUTION]
-> This requires caution.
+> Deleting the `markpaper.js` file will stop the rendering engine completely.
 
 **Features:**
 
 - 5 types of alerts (NOTE, WARNING, IMPORTANT, TIP, CAUTION)
 - Color coding and icons according to each type
 - Multi-line content support
+
+#### Task Lists
+
+- [x] Implement Syntax Highlighting
+- [x] Implement LaTeX Support
+- [x] Implement Video Embeds
+- [ ] Write Documentation
+- [ ] Release Version 1.0
+
 
 #### Code Blocks
 
@@ -303,10 +435,53 @@ function hello() {
 #### Regular Blockquotes
 
 ```markdown
-> This is a regular blockquote.
+> "Code is like humor. When you have to explain it, it’s bad."
+> — *Cory House*
 ```
 
-> This is a regular blockquote.
+> "Code is like humor. When you have to explain it, it’s bad."
+> — *Cory House*
+
+
+### Video Embeds
+
+You can embed videos simply by pasting the URL on its own line. MarkPaper creates a responsive player automatically.
+
+**YouTube Example:**
+https://www.youtube.com/watch?v=Xd2xr7zIFyk
+
+**Vimeo Example:**
+https://vimeo.com/858066420
+
+## Advanced HTML Elements
+
+MarkPaper supports specific HTML tags for creating interactive documentation.
+
+### Collapsible Content (Details)
+
+Use this to hide complex code or secondary information.
+
+<details>
+<summary><strong>Click to view detailed specifications</strong></summary>
+
+Here is the hidden content. It can contain text, lists, or even code.
+
+- Feature A: Enabled
+- Feature B: Disabled
+- Version: 2.1.0
+
+</details>
+
+### Definition Lists (Glossary)
+
+<dl>
+  <dt><strong>MarkPaper</strong></dt>
+  <dd>A lightweight, client-side Markdown rendering engine.</dd>
+  <dt><strong>Markdown</strong></dt>
+  <dd>A markup language for creating formatted text using a plain-text editor.</dd>
+</dl>
+
+
 
 #### Raw HTML Tags
 
@@ -393,11 +568,14 @@ By default, it uses a serif font stack optimized for Japanese text, but it can b
 
 ```plaintext
 markpaper/
-├── index.html          # Main HTML file
-├── index.md            # Markdown content file
-├── markpaper.js        # Custom Markdown parser
-├── markpaper.css       # Main stylesheet
-└── README.md          # This file
+├── assets/             # Icons, favicons, and images
+├── content/            # Markdown files (e.g., showcase.md)
+├── css/                # Stylesheets
+│   └── markpaper.css
+├── js/                 # Logic
+│   └── markpaper.js
+├── index.html          # Entry point
+└── README.md           # This file
 ```
 
 ## License
