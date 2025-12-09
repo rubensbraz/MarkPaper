@@ -515,11 +515,12 @@ class MarkPaperParser {
   flushCodeBlock() {
     if (!this.state.inCodeBlock) return;
 
-    // Default to 'plaintext' if no language specified, or use the language provided
-    // Prism usually likes 'language-xxx'
-    const langClass = this.state.codeLang
-      ? ` class="language-${this.state.codeLang}"`
-      : ' class="language-plaintext"';
+    // Use default plaintext if no language is specified
+    const rawLang = this.state.codeLang.toLowerCase() || 'plaintext';
+    // Map some common aliases to Prism defaults if needed (optional)
+    const lang = rawLang === 'js' ? 'javascript' : rawLang === 'py' ? 'python' : rawLang;
+
+    const langClass = ` class="language-${lang}"`;
 
     this.html += `<div class="code-block-container"><button class="copy-btn">Copy</button><pre><code${langClass}>`;
     this.html += this.state.codeBuffer.map(l => this.escapeHTML(l)).join('\n');
@@ -700,7 +701,7 @@ class MarkPaperParser {
   }
 
   sanitizeHTML(text) {
-    // Basic Sanitization Logic (same as original)
+    // Basic Sanitization Logic
     return text.replace(/<(\/?)([\w-]+)([^>]*)>/gi, (match, slash, tag, attrs) => {
       const tagLower = tag.toLowerCase();
       if (!CONFIG.ALLOWED_TAGS.includes(tagLower)) {
@@ -731,19 +732,15 @@ class MarkPaperParser {
   }
 
   /**
-   * Parses inline Markdown (Bold, Italic, Link, Image, Footnote, Inline Math).
+   * Parses inline Markdown.
    */
   escapeInline(text) {
-    // 0. Process Inline Math ($...$) FIRST to avoid conflict with markdown symbols (like _ or *)
-    // We use a temporary placeholder to protect Math HTML from further processing
+    // 0. Process Inline Math ($...$) FIRST
     const mathMap = new Map();
     let mCounter = 0;
 
-    // Regex for inline math: $...$ 
-    // Captures content ensuring it doesn't match empty $$ or escaped \$
     text = text.replace(/\$((?:[^\$]|\\\$)+)\$/g, (match, tex) => {
       const key = `__MATH_${mCounter++}__`;
-      // Render immediately using KaTeX
       mathMap.set(key, this.renderKaTeX(tex, false));
       return key;
     });
@@ -751,7 +748,7 @@ class MarkPaperParser {
     // 1. Sanitize raw HTML
     let escaped = this.sanitizeHTML(text);
 
-    // 2. Protect valid HTML tags 
+    // 2. Protect valid HTML tags
     const protectionMap = new Map();
     let pCounter = 0;
     escaped = escaped.replace(/<(\/?)([\w-]+)([^>]*)>/g, (match, slash, tag) => {
@@ -774,25 +771,17 @@ class MarkPaperParser {
     mathMap.forEach((val, key) => { escaped = escaped.replace(key, val); });
 
     // 5. Markdown Processing
-
-    // Bold: **text**
     escaped = escaped.replace(/\*\*(.+?)\*\*/g, '<strong>$1</strong>');
-    // Italic: *text*
     escaped = escaped.replace(/\*(.+?)\*/g, '<em>$1</em>');
-    // Strike: ~~text~~
     escaped = escaped.replace(/~~(.+?)~~/g, '<s>$1</s>');
-    // Inline Code: `text`
     escaped = escaped.replace(/`([^`]+)`/g, '<code>$1</code>');
 
-    // Images (Inline)
     escaped = escaped.replace(/!\[([^\]]*)\]\(([^)]+)\)/g, (match, alt, src) => {
       return `<img src="${src}" alt="${this.escapeHTML(alt)}">`;
     });
 
-    // Links
     escaped = escaped.replace(/\[([^\]]+)\]\(([^)]+)\)/g, '<a href="$2" target="_blank" rel="noopener noreferrer">$1</a>');
 
-    // Footnotes
     escaped = escaped.replace(/\[\^([^\]]+)\]/g, (match, id) => {
       if (!this.sectionFootnotes.includes(id)) {
         this.sectionFootnotes.push(id);
@@ -800,12 +789,10 @@ class MarkPaperParser {
       return `<sup><a href="#footnote-${id}" class="footnote-ref">${id}</a></sup>`;
     });
 
-    // Auto-link URLs
     const urlPattern = /(https?:\/\/[^\s<>"']+|ftp:\/\/[^\s<>"']+)/g;
     escaped = escaped.replace(urlPattern, (match) => {
       return `<a href="${match}" target="_blank" rel="noopener noreferrer">${match}</a>`;
     });
-    // Fix nested link issue if autolink caught something inside an <a> tag
     escaped = escaped.replace(/href="<a href="([^"]+)"[^>]*>[^<]+<\/a>"/g, 'href="$1"');
 
     return escaped;
@@ -827,13 +814,19 @@ class MarkPaperUI {
     this.setupToc();
     this.setupScrollSpy();
     this.setupCopyButtons();
+    // IMPORTANT: Trigger highlight immediately after DOM is ready
     this.triggerSyntaxHighlight();
   }
 
   triggerSyntaxHighlight() {
-    // If Prism is loaded, trigger highlight
     if (typeof Prism !== 'undefined') {
+      // Force Prism to highlight all code blocks found on page
       Prism.highlightAll();
+    } else {
+      // Fallback: if script loads slowly, try again in 500ms
+      setTimeout(() => {
+        if (typeof Prism !== 'undefined') Prism.highlightAll();
+      }, 500);
     }
   }
 
@@ -963,13 +956,13 @@ class MarkPaperUI {
       .then(markdown => {
         const html = parser.parse(markdown, path.split('/').pop());
         target.innerHTML = html;
-        ui.init();
+        ui.init(); // This now triggers Prism.highlightAll()
       })
       .catch(err => {
         const msg = `
 > [!CAUTION]
 > Failed to load file: "${path}".
-> 
+>
 > **Error:** ${err.message}
         `;
         target.innerHTML = parser.parse(msg);
