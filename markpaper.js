@@ -45,6 +45,19 @@ const CONFIG = {
     TABLE_ROW: /^\s*\|?(.+)\|?\s*$/,
     IMAGE: /^!\[([^\]]*)\]\(([^)]+)\)/,
     FOOTNOTE_DEF: /^\[\^([^\]]+)\]:\s*(.+)$/
+  },
+
+  // Default Settings for Reset
+  DEFAULTS: {
+    '--font-base-size': '16px',
+    '--text-color': '#212529',
+    '--background-color': '#FFFFFF',
+    '--accent-color': '#4a6a70',
+    '--current-font-family': 'serif',
+    '--border-color': '#e9ecef',
+    '--modal-header-bg': '#f8f9fa',
+    '--light-gray-color': '#f8f9fa',
+    '--code-background': '#f8f9fa'
   }
 };
 
@@ -76,29 +89,12 @@ class MarkPaperParser {
 
     // Block State
     this.state = {
-      inCodeBlock: false,
-      codeFence: '',
-      codeLang: '',
-      codeBuffer: [],
-
-      inMathBlock: false,
-      mathBuffer: [],
-
-      inTable: false,
-      tableHeader: null,
-      tableRows: [],
-
-      inBlockquote: false,
-      blockquoteBuffer: [],
-
-      inAlert: false,
-      alertType: '',
-      alertBuffer: [],
-
-      // List Stack: Array of objects { type: 'ul'|'ol', level: int }
-      listStack: [],
-      // Ordered List Counters: Array of integers, index corresponds to nesting level
-      listCounters: []
+      inCodeBlock: false, codeFence: '', codeLang: '', codeBuffer: [],
+      inMathBlock: false, mathBuffer: [],
+      inTable: false, tableHeader: null, tableRows: [],
+      inBlockquote: false, blockquoteBuffer: [],
+      inAlert: false, alertType: '', alertBuffer: [],
+      listStack: [], listCounters: []
     };
   }
 
@@ -113,38 +109,35 @@ class MarkPaperParser {
     this.currentFileName = fileName;
 
     const rawLines = markdown.split(/\r?\n/);
-
-    // Pass 0: Extract Footnote Definitions & Metadata
     const lines = this.preprocess(rawLines);
 
-    // Pass 1: Line-by-line Processing
     for (let i = 0; i < lines.length; i++) {
-      const line = lines[i].trimEnd(); // Keep indentation, remove trailing whitespace
+      const line = lines[i].trimEnd();
 
-      // 1. Handle Code Blocks (Priority: they consume everything)
+      // 1. Handle Code Blocks
       if (this.processCodeBlock(line)) continue;
       if (this.state.inCodeBlock) {
         this.state.codeBuffer.push(line);
         continue;
       }
 
-      // 2. Handle Math Blocks (display math $$)
+      // 2. Handle Math Blocks
       if (this.processMathBlock(line)) continue;
       if (this.state.inMathBlock) {
         this.state.mathBuffer.push(line);
         continue;
       }
 
-      // 3. Handle Empty Lines (Close tight blocks like lists/tables)
+      // 3. Handle Empty Lines
       if (line.trim() === '') {
         this.processEmptyLine();
         continue;
       }
 
-      // 4. Handle Indented Code Blocks (4 spaces or tab)
+      // 4. Handle Indented Code Blocks
       if (this.processIndentedCode(line)) continue;
 
-      // 5. Handle Headings (H1-H6)
+      // 5. Handle Headings
       if (this.processHeadings(line, i, lines)) continue;
 
       // 6. Handle Horizontal Rules
@@ -154,7 +147,7 @@ class MarkPaperParser {
         continue;
       }
 
-      // 7. Handle Lists (UL/OL)
+      // 7. Handle Lists
       if (this.processLists(line)) continue;
 
       // 8. Handle Tables
@@ -167,7 +160,6 @@ class MarkPaperParser {
       if (this.processStandaloneImage(line)) continue;
 
       // 11. Default: Paragraph
-      // Close lists/tables if we hit a standard paragraph text
       this.closeList();
       this.closeTable();
       this.closeBlockquote();
@@ -178,27 +170,21 @@ class MarkPaperParser {
 
     // Final Cleanup
     this.closeAllBlocks();
-    this.appendSectionFootnotes(); // Flush remaining footnotes
+    this.appendSectionFootnotes();
     this.html += this.generateFooter();
 
     return this.html;
   }
 
-  // --- Pre-processing ---
-
   preprocess(lines) {
     const cleanedLines = [];
-
     for (let i = 0; i < lines.length; i++) {
       const line = lines[i];
-
-      // Extract Footnotes
       const fnMatch = line.match(CONFIG.PATTERNS.FOOTNOTE_DEF);
       if (fnMatch) {
         this.footnotesDef[fnMatch[1]] = fnMatch[2];
-        continue; // Remove definition from output lines
+        continue;
       }
-
       cleanedLines.push(line);
     }
     return cleanedLines;
@@ -211,17 +197,13 @@ class MarkPaperParser {
     if (match) {
       const fence = match[1];
       const lang = match[2];
-
       if (this.state.inCodeBlock) {
-        // Only close if fence matches the opener (``` vs ````)
         if (fence === this.state.codeFence) {
           this.flushCodeBlock();
           return true;
         }
-        // Nested fence, treat as content
         return false;
       } else {
-        // Start Code Block
         this.closeAllBlocks();
         this.state.inCodeBlock = true;
         this.state.codeFence = fence;
@@ -235,23 +217,18 @@ class MarkPaperParser {
 
   processMathBlock(line) {
     const match = line.match(CONFIG.PATTERNS.MATH_BLOCK_START);
-
-    // Check for inline usage of display math e.g. $$x = y$$ in one line
+    // Inline usage of display math check
     const singleLineMatch = line.match(/^\$\$(.+)\$\$$/);
     if (singleLineMatch && !this.state.inMathBlock) {
       this.closeAllBlocks();
-      const tex = singleLineMatch[1];
-      this.html += this.renderKaTeX(tex, true);
+      this.html += this.renderKaTeX(singleLineMatch[1], true);
       return true;
     }
-
     if (match) {
       if (this.state.inMathBlock) {
-        // Close Math Block
         this.flushMathBlock();
         return true;
       } else {
-        // Start Math Block
         this.closeAllBlocks();
         this.state.inMathBlock = true;
         this.state.mathBuffer = [];
@@ -262,15 +239,12 @@ class MarkPaperParser {
   }
 
   processIndentedCode(line) {
-    // Check for 4 spaces or tab at start
     if ((line.startsWith('    ') || line.startsWith('\t')) &&
       !CONFIG.PATTERNS.LIST_UL.test(line) &&
       !CONFIG.PATTERNS.LIST_OL.test(line) &&
-      !this.state.inMathBlock) { // Ensure not inside math
-
+      !this.state.inMathBlock) {
       this.closeList();
       const codeText = line.replace(/^(    |\t)/, '');
-      // Prism requires a class on <code>, e.g. language-plaintext if unknown
       this.html += `<div class="code-block-container"><button class="copy-btn">Copy</button><pre><code class="language-plaintext">${this.escapeHTML(codeText)}</code></pre></div>\n`;
       return true;
     }
@@ -278,108 +252,67 @@ class MarkPaperParser {
   }
 
   processHeadings(line, index, lines) {
-    // H1 (Metadata handling)
     const h1Match = line.match(CONFIG.PATTERNS.H1);
     if (h1Match) {
       this.closeAllBlocks();
-      this.appendSectionFootnotes(); // Flush previous footnotes
+      this.appendSectionFootnotes();
       this.currentSectionLevel = 1;
-
-      // Extract Metadata (look ahead)
       let metadata = {};
       let k = index + 1;
-      let consumedLines = 0;
-
       while (k < lines.length) {
         const nextLine = lines[k].trim();
-        if (nextLine === '') {
-          k++; consumedLines++; continue;
-        }
+        if (nextLine === '') { k++; continue; }
         const metaMatch = nextLine.match(CONFIG.PATTERNS.METADATA);
         if (metaMatch) {
           metadata[metaMatch[1]] = metaMatch[2];
-          lines[k] = ''; // Remove line from future processing
-          k++;
-        } else {
-          break;
-        }
+          lines[k] = ''; k++;
+        } else { break; }
       }
-
       this.html += this.renderDocumentHeader(h1Match[1], metadata);
       return true;
     }
 
-    // H2-H6
     const hMatch = line.match(CONFIG.PATTERNS.HEADING);
     if (hMatch) {
       this.closeAllBlocks();
-
       const level = hMatch[1].length;
       const text = hMatch[2];
-
       if (level <= this.currentSectionLevel || this.currentSectionLevel >= 3) {
         this.appendSectionFootnotes();
       }
-
       this.currentSectionLevel = level;
-
-      // Auto-numbering logic
       let displayText = text;
       if (level === 2) {
-        this.chapterNum++;
-        this.sectionNum = 0;
+        this.chapterNum++; this.sectionNum = 0;
         displayText = `${this.chapterNum} ${text}`;
       } else if (level === 3) {
         this.sectionNum++;
         displayText = `${this.chapterNum}.${this.sectionNum} ${text}`;
       }
-
-      this.html += `<h${level}>${this.escapeInline(displayText)}</h${level}>\n`;
+      this.html += `<h${level} id="section-${this.chapterNum}-${this.sectionNum}">${this.escapeInline(displayText)}</h${level}>\n`;
       return true;
     }
-
     return false;
   }
 
   processLists(line) {
     let match, type, content;
-
-    // Detect Type
     const ulMatch = line.match(CONFIG.PATTERNS.LIST_UL);
     const olMatch = line.match(CONFIG.PATTERNS.LIST_OL);
 
-    if (ulMatch) {
-      match = ulMatch;
-      type = 'ul';
-      content = match[2];
-    } else if (olMatch) {
-      match = olMatch;
-      type = 'ol';
-      content = match[3];
-    } else {
-      return false; // Not a list
-    }
+    if (ulMatch) { match = ulMatch; type = 'ul'; content = match[2]; }
+    else if (olMatch) { match = olMatch; type = 'ol'; content = match[3]; }
+    else { return false; }
 
-    // Close non-list blocks
-    this.closeBlockquote();
-    this.closeAlert();
-    this.closeTable();
-
-    // Determine Level
+    this.closeBlockquote(); this.closeAlert(); this.closeTable();
     const indent = match[1].length;
     const level = Math.floor(indent / 2);
 
-    // 1. Close deeper levels
-    while (this.state.listStack.length > level + 1) {
-      this.closeOneListLevel();
-    }
-
-    // 2. Open new level
+    while (this.state.listStack.length > level + 1) { this.closeOneListLevel(); }
     if (this.state.listStack.length <= level) {
       if (this.state.listStack.length === level + 1 && this.state.listStack[level].type !== type) {
         this.closeOneListLevel();
       }
-
       if (this.state.listStack.length <= level) {
         this.html += `<${type}>\n`;
         this.state.listStack.push({ type: type, level: level });
@@ -387,7 +320,6 @@ class MarkPaperParser {
       }
     }
 
-    // 4. Render Item
     const taskMatch = content.match(CONFIG.PATTERNS.CHECKBOX);
     if (taskMatch) {
       const checked = taskMatch[1].toLowerCase() === 'x' ? 'checked' : '';
@@ -396,73 +328,47 @@ class MarkPaperParser {
     } else {
       this.html += `<li>${this.escapeInline(content)}</li>\n`;
     }
-
     return true;
   }
 
   processTables(line, index, lines) {
     if (!line.includes('|')) return false;
-
     const match = line.match(CONFIG.PATTERNS.TABLE_ROW);
     if (!match) return false;
-
     const cells = match[1].split('|').map(c => c.trim()).filter(c => c !== '');
-
     const isSeparator = cells.every(c => /^[-\s:]+$/.test(c));
     if (isSeparator) return true;
 
-    this.closeList();
-    this.closeBlockquote();
-    this.closeAlert();
-
+    this.closeList(); this.closeBlockquote(); this.closeAlert();
     if (!this.state.inTable) {
       this.state.inTable = true;
       const nextLine = (index + 1 < lines.length) ? lines[index + 1] : '';
-      if (nextLine.includes('|') && nextLine.includes('-')) {
-        this.state.tableHeader = cells;
-      } else {
-        this.state.tableRows.push(cells);
-      }
-    } else {
-      this.state.tableRows.push(cells);
-    }
+      if (nextLine.includes('|') && nextLine.includes('-')) { this.state.tableHeader = cells; }
+      else { this.state.tableRows.push(cells); }
+    } else { this.state.tableRows.push(cells); }
     return true;
   }
 
   processQuotesAndAlerts(line) {
     const isQuoteChar = line.startsWith('>');
-
     if (!isQuoteChar && !this.state.inAlert && !this.state.inBlockquote) return false;
-
     let content = '';
-    if (isQuoteChar) {
-      content = line.slice(1).trim();
-    } else {
+    if (isQuoteChar) { content = line.slice(1).trim(); }
+    else {
       if (this.state.inAlert) content = line;
       else if (this.state.inBlockquote) content = line;
       else return false;
     }
-
     const alertMatch = content.match(CONFIG.PATTERNS.ALERT);
     if (alertMatch) {
-      this.closeList();
-      this.closeAlert();
-      this.closeBlockquote();
-
+      this.closeList(); this.closeAlert(); this.closeBlockquote();
       this.state.inAlert = true;
       this.state.alertType = alertMatch[1].toLowerCase();
       return true;
     }
-
-    if (this.state.inAlert) {
-      this.state.alertBuffer.push(content);
-      return true;
-    }
-
-    this.closeList();
-    this.closeAlert();
+    if (this.state.inAlert) { this.state.alertBuffer.push(content); return true; }
+    this.closeList(); this.closeAlert();
     if (!this.state.inBlockquote) this.state.inBlockquote = true;
-
     this.state.blockquoteBuffer.push(content);
     return true;
   }
@@ -479,7 +385,6 @@ class MarkPaperParser {
           const w = attrs.match(/width\s*=\s*"?([^"}]+)"?/);
           if (w) style = ` style="width: ${this.escapeHTML(w[1])};"`;
         }
-
         this.html += `<figure class="image-figure">`;
         this.html += `<img src="${src}" alt="${this.escapeHTML(alt)}"${style} />`;
         if (alt && alt.trim()) {
@@ -494,50 +399,31 @@ class MarkPaperParser {
   }
 
   processEmptyLine() {
-    if (this.state.inCodeBlock) {
-      this.state.codeBuffer.push('');
-    } else if (this.state.inMathBlock) {
-      this.state.mathBuffer.push('');
-    } else if (this.state.inAlert) {
-      this.state.alertBuffer.push('');
-    } else if (this.state.inBlockquote) {
-      this.state.blockquoteBuffer.push('');
-    } else {
-      this.closeList();
-      this.closeTable();
-      this.closeBlockquote();
-      this.closeAlert();
-    }
+    if (this.state.inCodeBlock) this.state.codeBuffer.push('');
+    else if (this.state.inMathBlock) this.state.mathBuffer.push('');
+    else if (this.state.inAlert) this.state.alertBuffer.push('');
+    else if (this.state.inBlockquote) this.state.blockquoteBuffer.push('');
+    else { this.closeList(); this.closeTable(); this.closeBlockquote(); this.closeAlert(); }
   }
 
-  // --- Closers (Flushing Buffers) ---
+  // --- Closers & Rendering ---
 
   flushCodeBlock() {
     if (!this.state.inCodeBlock) return;
-
-    // Use default plaintext if no language is specified
     const rawLang = this.state.codeLang.toLowerCase() || 'plaintext';
-    // Map some common aliases to Prism defaults if needed (optional)
     const lang = rawLang === 'js' ? 'javascript' : rawLang === 'py' ? 'python' : rawLang;
-
     const langClass = ` class="language-${lang}"`;
-
     this.html += `<div class="code-block-container"><button class="copy-btn">Copy</button><pre><code${langClass}>`;
     this.html += this.state.codeBuffer.map(l => this.escapeHTML(l)).join('\n');
     this.html += `</code></pre></div>\n`;
-
-    this.state.inCodeBlock = false;
-    this.state.codeBuffer = [];
-    this.state.codeLang = '';
+    this.state.inCodeBlock = false; this.state.codeBuffer = []; this.state.codeLang = '';
   }
 
   flushMathBlock() {
     if (!this.state.inMathBlock) return;
     const tex = this.state.mathBuffer.join('\n');
     this.html += this.renderKaTeX(tex, true);
-
-    this.state.inMathBlock = false;
-    this.state.mathBuffer = [];
+    this.state.inMathBlock = false; this.state.mathBuffer = [];
   }
 
   closeOneListLevel() {
@@ -545,16 +431,9 @@ class MarkPaperParser {
     const item = this.state.listStack.pop();
     this.html += `</${item.type}>\n`;
   }
-
-  closeList() {
-    while (this.state.listStack.length > 0) {
-      this.closeOneListLevel();
-    }
-  }
-
+  closeList() { while (this.state.listStack.length > 0) this.closeOneListLevel(); }
   closeTable() {
     if (!this.state.inTable) return;
-
     this.html += '<table>\n';
     if (this.state.tableHeader) {
       this.html += '<thead>\n<tr>\n';
@@ -571,67 +450,39 @@ class MarkPaperParser {
       this.html += '</tbody>\n';
     }
     this.html += '</table>\n';
-
-    this.state.inTable = false;
-    this.state.tableHeader = null;
-    this.state.tableRows = [];
+    this.state.inTable = false; this.state.tableHeader = null; this.state.tableRows = [];
   }
-
   closeBlockquote() {
     if (!this.state.inBlockquote) return;
-
     this.html += '<blockquote>';
     this.html += this.renderBufferedParagraphs(this.state.blockquoteBuffer);
     this.html += '</blockquote>\n';
-
-    this.state.inBlockquote = false;
-    this.state.blockquoteBuffer = [];
+    this.state.inBlockquote = false; this.state.blockquoteBuffer = [];
   }
-
   closeAlert() {
     if (!this.state.inAlert) return;
-
     const titles = { 'note': 'Note', 'warning': 'Warning', 'important': 'Important', 'tip': 'Tip', 'caution': 'Caution' };
     const title = titles[this.state.alertType] || 'Alert';
-
     this.html += `<div class="alert alert-${this.state.alertType}">`;
     this.html += `<div class="alert-header"><span class="alert-title">${title}</span></div>`;
     this.html += `<div class="alert-content">`;
     this.html += this.renderBufferedParagraphs(this.state.alertBuffer);
     this.html += `</div></div>\n`;
-
-    this.state.inAlert = false;
-    this.state.alertBuffer = [];
-    this.state.alertType = '';
+    this.state.inAlert = false; this.state.alertBuffer = []; this.state.alertType = '';
   }
-
   closeAllBlocks() {
-    this.flushCodeBlock();
-    this.flushMathBlock();
-    this.closeList();
-    this.closeTable();
-    this.closeAlert();
-    this.closeBlockquote();
+    this.flushCodeBlock(); this.flushMathBlock(); this.closeList(); this.closeTable(); this.closeAlert(); this.closeBlockquote();
   }
-
-  // --- Generators & Utilities ---
 
   renderBufferedParagraphs(lines) {
-    let output = '';
-    let pBuffer = [];
-
+    let output = ''; let pBuffer = [];
     const flushP = () => {
       if (pBuffer.length > 0) {
         const text = pBuffer.map(l => this.escapeInline(l)).join(' ');
-        output += `<p>${text}</p>`;
-        pBuffer = [];
+        output += `<p>${text}</p>`; pBuffer = [];
       }
     };
-
-    lines.forEach(l => {
-      if (l === '') flushP();
-      else pBuffer.push(l);
-    });
+    lines.forEach(l => { if (l === '') flushP(); else pBuffer.push(l); });
     flushP();
     return output;
   }
@@ -648,67 +499,37 @@ class MarkPaperParser {
   }
 
   generateFooter() {
-    return `
-<footer class="markpaper-footer">
-  <p>This HTML page was automatically generated from "${this.currentFileName}" by <a href="https://github.com/TetsuakiBaba/MarkPaper" target="_blank" rel="noopener noreferrer">MarkPaper</a>.</p>
-</footer>`;
+    return `<footer class="markpaper-footer"><p>Generated by <a href="https://github.com/TetsuakiBaba/MarkPaper" target="_blank">MarkPaper</a>.</p></footer>`;
   }
-
   appendSectionFootnotes() {
     if (this.sectionFootnotes.length === 0) return;
-
     this.html += '<div class="footnotes">\n';
     this.sectionFootnotes.forEach(id => {
       if (this.footnotesDef[id]) {
-        this.html += `<div class="footnote" id="footnote-${id}">`;
-        this.html += `<sup>${id}</sup> ${this.escapeInline(this.footnotesDef[id])}`;
-        this.html += `</div>\n`;
+        this.html += `<div class="footnote" id="footnote-${id}"><sup>${id}</sup> ${this.escapeInline(this.footnotesDef[id])}</div>\n`;
       }
     });
     this.html += '</div>\n';
     this.sectionFootnotes = [];
   }
 
-  // --- Rendering Helpers ---
-
-  /**
-   * Safe wrapper for KaTeX rendering
-   */
   renderKaTeX(tex, displayMode = false) {
-    if (typeof katex === 'undefined') {
-      return displayMode ? `<pre>${tex}</pre>` : `<code>${tex}</code>`;
-    }
+    if (typeof katex === 'undefined') return displayMode ? `<pre>${tex}</pre>` : `<code>${tex}</code>`;
     try {
-      return katex.renderToString(tex, {
-        displayMode: displayMode,
-        throwOnError: false
-      });
+      return katex.renderToString(tex, { displayMode: displayMode, throwOnError: false });
     } catch (e) {
-      console.error('KaTeX error:', e);
-      return `<span style="color:red">Error parsing math</span>`;
+      console.error('KaTeX error:', e); return `<span style="color:red">Error parsing math</span>`;
     }
   }
-
-  // --- Escaping & Sanitization ---
 
   escapeHTML(text) {
-    return text
-      .replace(/&/g, '&amp;')
-      .replace(/</g, '&lt;')
-      .replace(/>/g, '&gt;')
-      .replace(/"/g, '&quot;')
-      .replace(/'/g, '&#39;');
+    return text.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;').replace(/'/g, '&#39;');
   }
-
   sanitizeHTML(text) {
-    // Basic Sanitization Logic
     return text.replace(/<(\/?)([\w-]+)([^>]*)>/gi, (match, slash, tag, attrs) => {
       const tagLower = tag.toLowerCase();
-      if (!CONFIG.ALLOWED_TAGS.includes(tagLower)) {
-        return match.replace(/</g, '&lt;').replace(/>/g, '&gt;');
-      }
+      if (!CONFIG.ALLOWED_TAGS.includes(tagLower)) return match.replace(/</g, '&lt;').replace(/>/g, '&gt;');
       if (slash === '/') return `</${tag}>`;
-
       let safeAttrs = '';
       if (attrs.trim()) {
         const attrMatches = attrs.match(/\s+([^=\s]+)(?:\s*=\s*(?:"([^"]*)"|'([^']*)'|([^\s>]+)))?/g);
@@ -730,71 +551,41 @@ class MarkPaperParser {
       return `<${tag}${safeAttrs}>`;
     });
   }
-
-  /**
-   * Parses inline Markdown.
-   */
   escapeInline(text) {
-    // 0. Process Inline Math ($...$) FIRST
-    const mathMap = new Map();
-    let mCounter = 0;
-
+    const mathMap = new Map(); let mCounter = 0;
     text = text.replace(/\$((?:[^\$]|\\\$)+)\$/g, (match, tex) => {
       const key = `__MATH_${mCounter++}__`;
       mathMap.set(key, this.renderKaTeX(tex, false));
       return key;
     });
-
-    // 1. Sanitize raw HTML
     let escaped = this.sanitizeHTML(text);
-
-    // 2. Protect valid HTML tags
-    const protectionMap = new Map();
-    let pCounter = 0;
+    const protectionMap = new Map(); let pCounter = 0;
     escaped = escaped.replace(/<(\/?)([\w-]+)([^>]*)>/g, (match, slash, tag) => {
       if (CONFIG.ALLOWED_TAGS.includes(tag.toLowerCase())) {
         const key = `__TAG_${pCounter++}__`;
-        protectionMap.set(key, match);
-        return key;
+        protectionMap.set(key, match); return key;
       }
       return match;
     });
-
-    // 3. Escape remaining special chars
-    escaped = escaped
-      .replace(/&(?![a-zA-Z0-9#]+;)/g, '&amp;')
-      .replace(/</g, '&lt;')
-      .replace(/>/g, '&gt;');
-
-    // 4. Restore protected tags & Math
+    escaped = escaped.replace(/&(?![a-zA-Z0-9#]+;)/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
     protectionMap.forEach((val, key) => { escaped = escaped.replace(key, val); });
     mathMap.forEach((val, key) => { escaped = escaped.replace(key, val); });
 
-    // 5. Markdown Processing
     escaped = escaped.replace(/\*\*(.+?)\*\*/g, '<strong>$1</strong>');
     escaped = escaped.replace(/\*(.+?)\*/g, '<em>$1</em>');
     escaped = escaped.replace(/~~(.+?)~~/g, '<s>$1</s>');
     escaped = escaped.replace(/`([^`]+)`/g, '<code>$1</code>');
-
     escaped = escaped.replace(/!\[([^\]]*)\]\(([^)]+)\)/g, (match, alt, src) => {
       return `<img src="${src}" alt="${this.escapeHTML(alt)}">`;
     });
-
     escaped = escaped.replace(/\[([^\]]+)\]\(([^)]+)\)/g, '<a href="$2" target="_blank" rel="noopener noreferrer">$1</a>');
-
     escaped = escaped.replace(/\[\^([^\]]+)\]/g, (match, id) => {
-      if (!this.sectionFootnotes.includes(id)) {
-        this.sectionFootnotes.push(id);
-      }
+      if (!this.sectionFootnotes.includes(id)) this.sectionFootnotes.push(id);
       return `<sup><a href="#footnote-${id}" class="footnote-ref">${id}</a></sup>`;
     });
-
     const urlPattern = /(https?:\/\/[^\s<>"']+|ftp:\/\/[^\s<>"']+)/g;
-    escaped = escaped.replace(urlPattern, (match) => {
-      return `<a href="${match}" target="_blank" rel="noopener noreferrer">${match}</a>`;
-    });
+    escaped = escaped.replace(urlPattern, (match) => { return `<a href="${match}" target="_blank" rel="noopener noreferrer">${match}</a>`; });
     escaped = escaped.replace(/href="<a href="([^"]+)"[^>]*>[^<]+<\/a>"/g, 'href="$1"');
-
     return escaped;
   }
 }
@@ -806,6 +597,7 @@ class MarkPaperParser {
 class MarkPaperUI {
   constructor() {
     this.dom = {};
+    this.settings = new SettingsController(this);
   }
 
   init() {
@@ -814,31 +606,101 @@ class MarkPaperUI {
     this.setupToc();
     this.setupScrollSpy();
     this.setupCopyButtons();
-    // IMPORTANT: Trigger highlight immediately after DOM is ready
     this.triggerSyntaxHighlight();
+    this.updateDocumentTitle();
+    this.setupProgressBar();
+    this.setupAnchors();
+    this.setupScrollHistory();
+    this.settings.init();
   }
 
   triggerSyntaxHighlight() {
     if (typeof Prism !== 'undefined') {
-      // Force Prism to highlight all code blocks found on page
       Prism.highlightAll();
     } else {
-      // Fallback: if script loads slowly, try again in 500ms
-      setTimeout(() => {
-        if (typeof Prism !== 'undefined') Prism.highlightAll();
-      }, 500);
+      setTimeout(() => { if (typeof Prism !== 'undefined') Prism.highlightAll(); }, 500);
     }
   }
 
+  updateDocumentTitle() {
+    const h1 = document.querySelector('h1');
+    if (h1) {
+      document.title = h1.innerText + ' - MarkPaper';
+    }
+  }
+
+  setupScrollHistory() {
+    // Restore
+    const savedPos = localStorage.getItem('markpaper_scrollpos');
+    const currentFile = window.location.search || 'default';
+    if (savedPos) {
+      try {
+        const data = JSON.parse(savedPos);
+        if (data.file === currentFile) {
+          setTimeout(() => window.scrollTo(0, data.y), 100);
+        }
+      } catch (e) { console.error('Error reading scroll history', e); }
+    }
+    // Save
+    window.addEventListener('scroll', () => {
+      const state = { file: currentFile, y: window.scrollY };
+      localStorage.setItem('markpaper_scrollpos', JSON.stringify(state));
+    }, { passive: true });
+  }
+
+  setupProgressBar() {
+    const bar = document.getElementById('reading-progress');
+    if (!bar) return;
+    window.addEventListener('scroll', () => {
+      const scrollTop = document.documentElement.scrollTop || document.body.scrollTop;
+      const scrollHeight = document.documentElement.scrollHeight - document.documentElement.clientHeight;
+      const scrolled = (scrollTop / scrollHeight) * 100;
+      bar.style.width = scrolled + "%";
+    }, { passive: true });
+  }
+
+  setupAnchors() {
+    const headings = document.querySelectorAll('h1, h2, h3, h4, h5, h6');
+    headings.forEach(h => {
+      if (!h.id) return;
+      const anchor = document.createElement('a');
+      anchor.className = 'heading-anchor';
+      anchor.href = `#${h.id}`;
+      anchor.innerHTML = '#';
+      anchor.title = 'Copy link to this section';
+      anchor.setAttribute('aria-hidden', 'true');
+      anchor.onclick = (e) => {
+        e.preventDefault();
+        const url = window.location.origin + window.location.pathname + window.location.search + '#' + h.id;
+        navigator.clipboard.writeText(url).then(() => {
+          anchor.style.color = 'var(--accent-hover-color)';
+          setTimeout(() => anchor.style.color = '', 500);
+        });
+        history.pushState(null, null, `#${h.id}`);
+        h.scrollIntoView({ behavior: 'smooth' });
+      };
+      h.appendChild(anchor);
+    });
+  }
+
   createDomElements() {
-    // 1. Hamburger Button
+    // Hamburger
     const btn = document.createElement('button');
     btn.className = 'hamburger-btn';
     btn.innerHTML = `<span></span><span></span><span></span>`;
     document.body.prepend(btn);
     this.dom.hamburger = btn;
 
-    // 2. Sidebar
+    // Settings Button
+    const settingsBtn = document.createElement('button');
+    settingsBtn.className = 'settings-btn';
+    settingsBtn.innerHTML = `<svg xmlns="http://www.w3.org/2000/svg" width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="3"></circle><path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 0 1 0 2.83 2 2 0 0 1-2.83 0l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 0 1-2 2 2 2 0 0 1-2-2v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 0 1-2.83 0 2 2 0 0 1 0-2.83l.06-.06a1.65 1.65 0 0 0 .33-1.82 1.65 1.65 0 0 0-1.51-1H3a2 2 0 0 1-2-2 2 2 0 0 1 2-2h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 0 1 0-2.83 2 2 0 0 1 2.83 0l.06.06a1.65 1.65 0 0 0 1.82.33H9a1.65 1.65 0 0 0 1-1.51V3a2 2 0 0 1 2-2 2 2 0 0 1 2 2v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 0 1 2.83 0 2 2 0 0 1 0 2.83l-.06.06a1.65 1.65 0 0 0-.33 1.82V9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 0 1 2 2 2 2 0 0 1-2 2h-.09a1.65 1.65 0 0 0-1.51 1z"></path></svg>`;
+    settingsBtn.title = "Settings";
+    settingsBtn.onclick = () => this.settings.toggle();
+    document.body.prepend(settingsBtn);
+    this.dom.settingsBtn = settingsBtn;
+
+    // Sidebar
     const nav = document.createElement('nav');
     nav.className = 'side-menu';
     nav.innerHTML = `
@@ -849,7 +711,7 @@ class MarkPaperUI {
     this.dom.menu = nav;
     this.dom.toc = nav.querySelector('#table-of-contents');
 
-    // 3. Overlay
+    // Overlay
     const overlay = document.createElement('div');
     overlay.className = 'overlay';
     document.body.appendChild(overlay);
@@ -862,10 +724,15 @@ class MarkPaperUI {
       this.dom.overlay.classList.toggle('show');
       this.dom.hamburger.classList.toggle('active');
     };
-
     this.dom.hamburger.addEventListener('click', (e) => { e.preventDefault(); toggle(); });
-    this.dom.overlay.addEventListener('click', toggle);
-    document.addEventListener('keydown', (e) => { if (e.key === 'Escape') this.closeMenu(); });
+    this.dom.overlay.addEventListener('click', () => {
+      if (this.settings.visible) {
+        this.settings.close();
+      } else {
+        toggle();
+      }
+    });
+    document.addEventListener('keydown', (e) => { if (e.key === 'Escape') { this.closeMenu(); this.settings.close(); } });
   }
 
   closeMenu() {
@@ -877,10 +744,8 @@ class MarkPaperUI {
   setupToc() {
     const headings = document.querySelectorAll('h2');
     this.dom.toc.innerHTML = '';
-
     headings.forEach((h, i) => {
       if (!h.id) h.id = `section-${i}`;
-
       const li = document.createElement('li');
       const a = document.createElement('a');
       a.href = `#${h.id}`;
@@ -898,22 +763,18 @@ class MarkPaperUI {
   setupScrollSpy() {
     const headings = document.querySelectorAll('h2');
     const links = this.dom.toc.querySelectorAll('a');
-
     const onScroll = () => {
       let currentId = '';
-      const offset = 120; // px
-
+      const offset = 120;
       headings.forEach(h => {
         if (window.scrollY + offset >= h.offsetTop) currentId = h.id;
       });
-
       links.forEach(l => {
         l.classList.toggle('active', l.getAttribute('href') === `#${currentId}`);
       });
     };
-
     window.addEventListener('scroll', onScroll);
-    onScroll(); // Init
+    onScroll();
   }
 
   setupCopyButtons() {
@@ -921,7 +782,6 @@ class MarkPaperUI {
       const btn = container.querySelector('.copy-btn');
       const code = container.querySelector('code');
       if (!btn || !code) return;
-
       btn.addEventListener('click', () => {
         navigator.clipboard.writeText(code.innerText).then(() => {
           btn.textContent = 'Copied!';
@@ -937,7 +797,214 @@ class MarkPaperUI {
 }
 
 // ============================================================================
-// 4. APPLICATION ENTRY
+// 4. SETTINGS CONTROLLER
+// ============================================================================
+
+class SettingsController {
+  constructor(ui) {
+    this.ui = ui;
+    this.visible = false;
+    this.prefs = this.loadPrefs();
+  }
+
+  init() {
+    this.renderModal();
+    this.applyPrefs();
+  }
+
+  loadPrefs() {
+    const saved = localStorage.getItem('markpaper_settings');
+    return saved ? { ...CONFIG.DEFAULTS, ...JSON.parse(saved) } : { ...CONFIG.DEFAULTS };
+  }
+
+  savePrefs() {
+    localStorage.setItem('markpaper_settings', JSON.stringify(this.prefs));
+    this.applyPrefs();
+  }
+
+  applyPrefs() {
+    const root = document.documentElement;
+    for (const [key, value] of Object.entries(this.prefs)) {
+      if (key === '--current-font-family') {
+        let stack = value;
+        if (value === 'serif') stack = 'var(--font-serif)';
+        if (value === 'sans') stack = 'var(--font-sans-serif)';
+        if (value === 'mono') stack = 'var(--font-monospace)';
+        root.style.setProperty(key, stack);
+      } else {
+        root.style.setProperty(key, value);
+      }
+    }
+  }
+
+  renderModal() {
+    const modal = document.createElement('div');
+    modal.className = 'settings-modal';
+    modal.innerHTML = `
+      <div class="settings-header">
+        <h3>Settings</h3>
+        <button class="close-settings">&times;</button>
+      </div>
+      <div class="settings-body">
+        
+        <div class="setting-group">
+            <label>Theme Preset</label>
+            <div class="theme-buttons">
+                <button class="btn-theme-light">Light</button>
+                <button class="btn-theme-dark">Dark Mode</button>
+            </div>
+        </div>
+
+        <div class="setting-group">
+          <label>Font Size (<span id="fs-val">${this.prefs['--font-base-size']}</span>)</label>
+          <input type="range" min="12" max="24" step="1" id="input-font-size" value="${parseInt(this.prefs['--font-base-size'])}">
+        </div>
+
+        <div class="setting-group">
+          <label>Font Family</label>
+          <select id="input-font-family">
+            <option value="serif">Serif (Classic)</option>
+            <option value="sans">Sans-Serif (Modern)</option>
+            <option value="mono">Monospace (Code)</option>
+          </select>
+        </div>
+
+        <div class="setting-group">
+          <label>Background Color</label>
+          <input type="color" id="input-bg-color" value="${this.prefs['--background-color']}">
+        </div>
+
+        <div class="setting-group">
+          <label>Text Color</label>
+          <input type="color" id="input-text-color" value="${this.prefs['--text-color']}">
+        </div>
+
+        <div class="setting-group">
+          <label>Link/Accent Color</label>
+          <input type="color" id="input-accent-color" value="${this.prefs['--accent-color']}">
+        </div>
+        
+        <div class="setting-actions">
+            <button class="btn-reset">Reset Defaults</button>
+        </div>
+      </div>
+    `;
+    document.body.appendChild(modal);
+    this.domModal = modal;
+    this.bindEvents();
+  }
+
+  bindEvents() {
+    const closeBtn = this.domModal.querySelector('.close-settings');
+    closeBtn.onclick = () => this.close();
+
+    // Font Size
+    const fsInput = this.domModal.querySelector('#input-font-size');
+    const fsDisplay = this.domModal.querySelector('#fs-val');
+    fsInput.oninput = (e) => {
+      const val = e.target.value + 'px';
+      this.prefs['--font-base-size'] = val;
+      fsDisplay.textContent = val;
+      this.savePrefs();
+    };
+
+    // Font Family
+    const ffInput = this.domModal.querySelector('#input-font-family');
+    const current = this.prefs['--current-font-family'];
+    if (current === 'var(--font-sans-serif)' || current === 'sans') ffInput.value = 'sans';
+    else if (current === 'var(--font-monospace)' || current === 'mono') ffInput.value = 'mono';
+    else ffInput.value = 'serif';
+
+    ffInput.onchange = (e) => {
+      this.prefs['--current-font-family'] = e.target.value;
+      this.savePrefs();
+    };
+
+    // Colors
+    const bindColor = (id, key) => {
+      const el = this.domModal.querySelector(id);
+      el.oninput = (e) => {
+        this.prefs[key] = e.target.value;
+        this.savePrefs();
+      };
+      return el;
+    };
+
+    const bgInput = bindColor('#input-bg-color', '--background-color');
+    const txtInput = bindColor('#input-text-color', '--text-color');
+    const accInput = bindColor('#input-accent-color', '--accent-color');
+
+    // Theme Buttons
+    this.domModal.querySelector('.btn-theme-dark').onclick = () => {
+      // Main Colors
+      this.prefs['--background-color'] = '#1a1a1a';
+      this.prefs['--text-color'] = '#e0e0e0';
+      this.prefs['--accent-color'] = '#76b5c5';
+
+      // Secondary Colors
+      this.prefs['--modal-header-bg'] = '#2d2d2d';
+      this.prefs['--border-color'] = '#444444';
+      this.prefs['--light-gray-color'] = '#2d2d2d';
+      this.prefs['--code-background'] = '#2d2d2d';
+
+      // Update Inputs
+      bgInput.value = '#1a1a1a';
+      txtInput.value = '#e0e0e0';
+      accInput.value = '#76b5c5';
+      this.savePrefs();
+    };
+
+    this.domModal.querySelector('.btn-theme-light').onclick = () => {
+      // Reset to Defaults
+      this.prefs['--background-color'] = CONFIG.DEFAULTS['--background-color'];
+      this.prefs['--text-color'] = CONFIG.DEFAULTS['--text-color'];
+      this.prefs['--accent-color'] = CONFIG.DEFAULTS['--accent-color'];
+
+      this.prefs['--modal-header-bg'] = CONFIG.DEFAULTS['--modal-header-bg'];
+      this.prefs['--border-color'] = CONFIG.DEFAULTS['--border-color'];
+      this.prefs['--light-gray-color'] = CONFIG.DEFAULTS['--light-gray-color'];
+      this.prefs['--code-background'] = CONFIG.DEFAULTS['--code-background'];
+
+      bgInput.value = CONFIG.DEFAULTS['--background-color'];
+      txtInput.value = CONFIG.DEFAULTS['--text-color'];
+      accInput.value = CONFIG.DEFAULTS['--accent-color'];
+      this.savePrefs();
+    };
+
+    // Reset
+    this.domModal.querySelector('.btn-reset').onclick = () => {
+      this.prefs = { ...CONFIG.DEFAULTS };
+      fsInput.value = 16;
+      fsDisplay.textContent = '16px';
+      ffInput.value = 'serif';
+      bgInput.value = CONFIG.DEFAULTS['--background-color'];
+      txtInput.value = CONFIG.DEFAULTS['--text-color'];
+      accInput.value = CONFIG.DEFAULTS['--accent-color'];
+      this.savePrefs();
+    };
+  }
+
+  toggle() {
+    this.visible = !this.visible;
+    if (this.visible) {
+      this.domModal.classList.add('open');
+      this.ui.dom.overlay.classList.add('show');
+    } else {
+      this.close();
+    }
+  }
+
+  close() {
+    this.visible = false;
+    this.domModal.classList.remove('open');
+    if (!this.ui.dom.menu.classList.contains('open')) {
+      this.ui.dom.overlay.classList.remove('show');
+    }
+  }
+}
+
+// ============================================================================
+// 5. APPLICATION ENTRY
 // ============================================================================
 
 (function () {
@@ -956,15 +1023,10 @@ class MarkPaperUI {
       .then(markdown => {
         const html = parser.parse(markdown, path.split('/').pop());
         target.innerHTML = html;
-        ui.init(); // This now triggers Prism.highlightAll()
+        ui.init();
       })
       .catch(err => {
-        const msg = `
-> [!CAUTION]
-> Failed to load file: "${path}".
->
-> **Error:** ${err.message}
-        `;
+        const msg = `> [!CAUTION]\n> Failed to load file: "${path}".\n>\n> **Error:** ${err.message}`;
         target.innerHTML = parser.parse(msg);
       });
   };
@@ -973,7 +1035,6 @@ class MarkPaperUI {
     const params = new URLSearchParams(window.location.search);
     const file = params.get('file') || 'index.md';
     loadFile(file);
-
     window.addEventListener('resize', () => { });
   });
 })();
