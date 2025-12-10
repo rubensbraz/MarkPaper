@@ -32,8 +32,8 @@ To use MarkPaper, include the CSS and JS files in your HTML document. You also n
     <link rel="icon" type="image/png" sizes="16x16" href="assets/favicon-16x16.png">
     <link rel="manifest" href="assets/site.webmanifest">
     <!-- MarkPaper -->
-    <link rel="stylesheet" href="css/markpaper.css">
-    <script src="js/markpaper.js"></script>
+    <link rel="stylesheet" href="markpaper.css">
+    <script src="markpaper.js"></script>
     <!-- Prism (Code highlighting) -->
     <link id="prism-theme-link" rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/prism-themes/1.9.0/prism-ghcolors.min.css">
     <script src="https://cdnjs.cloudflare.com/ajax/libs/prism/1.29.0/components/prism-core.min.js"></script>
@@ -409,7 +409,7 @@ MarkPaper supports the HTML tags for hiding complex information.
 
 ## Customization
 
-You can adjust the theme settings via the **Settings Button** (gear icon) in the top right corner, or by modifying the CSS variables in `css/markpaper.css`.
+You can adjust the theme settings via the **Settings Button** (gear icon) in the top right corner, or by modifying the CSS variables in `markpaper.css`.
 
 **Key CSS Variables:**
 

@@ -1093,6 +1093,37 @@ h6:hover .heading-anchor {
     border-color: #f5c6cb;
 }
 
+/* Custom scrollbars */
+/* Firefox */
+* {
+    scrollbar-width: thin;
+    scrollbar-color: var(--accent-color) transparent;
+}
+
+/* Chrome, Edge, Safari */
+::-webkit-scrollbar {
+    width: 6px;
+    height: 6px;
+}
+
+::-webkit-scrollbar-track {
+    background: transparent;
+}
+
+::-webkit-scrollbar-thumb {
+    background-color: var(--accent-color);
+    border-radius: 10px;
+    border: 1px solid transparent;
+}
+
+::-webkit-scrollbar-thumb:hover {
+    background-color: var(--accent-hover-color);
+}
+
+::-webkit-scrollbar-corner {
+    background: transparent;
+}
+
 /* ------------------------------------------------------------------
    7. MEDIA QUERIES
    ------------------------------------------------------------------ */
