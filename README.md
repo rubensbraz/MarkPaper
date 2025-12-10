@@ -1,12 +1,21 @@
 # MarkPaper Showcase & Documentation
 
 author: Tetsuaki Baba
+
 date: 2025-12-10
+
 institution: MarkPaper Project
 
 **MarkPaper** is a lightweight, client-side tool that transforms standard Markdown into beautiful, academic-style HTML documents. It features a robust parser built with vanilla JavaScript that supports extended syntax, including LaTeX math, syntax highlighting, dynamic diagrams, and responsive embeds.
 
 This document serves as both a **User Guide** and a **Live Demo**. Every section below shows the Markdown syntax followed by the rendered result.
+
+> [!TIP]
+> **LIVE DEMO**
+>
+> This document is designed to be viewed in **MarkPaper**. Click the button below to render this README with the full feature set.
+>
+> 👉 **[Click here to Launch MarkPaper Live Demo](https://rubensbraz.github.io/MarkPaper/?file=README.md)**
 
 ---
 
@@ -78,12 +87,13 @@ At the very top of your Markdown file, you can define metadata. This will automa
 ### Syntax
 
 ```markdown
-# My Research Paper Title
+# MarkPaper Showcase & Documentation
 
 author: Tetsuaki Baba
+
 date: 2025-12-10
-institution: Tokyo Metropolitan University
-editor: Jane Smith
+
+institution: MarkPaper Project
 ```
 
 ### Result

@@ -1418,7 +1418,7 @@ class SettingsController {
    */
   document.addEventListener('DOMContentLoaded', () => {
     const params = new URLSearchParams(window.location.search);
-    const file = params.get('file') || 'readme.md';
+    const file = params.get('file') || 'README.md';
 
     // Auto-detect if file is in content folder or root
     if (!file.includes('/')) {
