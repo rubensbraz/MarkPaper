@@ -1,6 +1,6 @@
 # MarkPaper Showcase & Documentation
 
-author: Tetsuaki Baba / Rubens Braz
+author: Tetsuaki Baba
 date: 2025-12-10
 institution: MarkPaper Project
 
@@ -10,7 +10,7 @@ This document serves as both a **User Guide** and a **Live Demo**. Every section
 
 ---
 
-## 1. Getting Started
+## Getting Started
 
 ### Installation
 
@@ -19,25 +19,46 @@ To use MarkPaper, include the CSS and JS files in your HTML document. You also n
 ```html
 <!DOCTYPE html>
 <html lang="en">
-<head>
+
+  <head>
     <meta charset="UTF-8">
-    <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>MarkPaper Document</title>
-    
+    <meta name="viewport" content="width=device-width, initial-scale=1, shrink-to-fit=no">
+    <meta http-equiv="X-UA-Compatible" content="IE=edge">
+    <title>MarkPaper</title>
+    <meta name="description" content="MarkPaper - Markdown to Clean Paper">
+    <!-- Favicon -->
+    <link rel="apple-touch-icon" sizes="180x180" href="assets/apple-touch-icon.png">
+    <link rel="icon" type="image/png" sizes="32x32" href="assets/favicon-32x32.png">
+    <link rel="icon" type="image/png" sizes="16x16" href="assets/favicon-16x16.png">
+    <link rel="manifest" href="assets/site.webmanifest">
+    <!-- MarkPaper -->
     <link rel="stylesheet" href="css/markpaper.css">
     <script src="js/markpaper.js"></script>
+    <!-- Prism (Code highlighting) -->
+    <link id="prism-theme-link" rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/prism-themes/1.9.0/prism-ghcolors.min.css">
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/prism/1.29.0/components/prism-core.min.js"></script>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/prism/1.29.0/plugins/autoloader/prism-autoloader.min.js"></script>
+    <!-- KaTeX (LaTeX parser) -->
+    <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/katex@0.16.9/dist/katex.min.css">
+    <script src="https://cdn.jsdelivr.net/npm/katex@0.16.9/dist/katex.min.js"></script>
+  </head>
 
-    <link rel="stylesheet" href="[https://cdnjs.cloudflare.com/ajax/libs/prism-themes/1.9.0/prism-ghcolors.min.css](https://cdnjs.cloudflare.com/ajax/libs/prism-themes/1.9.0/prism-ghcolors.min.css)">
-    <script src="[https://cdnjs.cloudflare.com/ajax/libs/prism/1.29.0/components/prism-core.min.js](https://cdnjs.cloudflare.com/ajax/libs/prism/1.29.0/components/prism-core.min.js)"></script>
-    <script src="[https://cdnjs.cloudflare.com/ajax/libs/prism/1.29.0/plugins/autoloader/prism-autoloader.min.js](https://cdnjs.cloudflare.com/ajax/libs/prism/1.29.0/plugins/autoloader/prism-autoloader.min.js)"></script>
-    <link rel="stylesheet" href="[https://cdn.jsdelivr.net/npm/katex@0.16.9/dist/katex.min.css](https://cdn.jsdelivr.net/npm/katex@0.16.9/dist/katex.min.css)">
-    <script src="[https://cdn.jsdelivr.net/npm/katex@0.16.9/dist/katex.min.js](https://cdn.jsdelivr.net/npm/katex@0.16.9/dist/katex.min.js)"></script>
-</head>
-<body>
+  <body>
     <main>
-        <article id="content">Loading...</article>
+      <article id="content">
+        <div class="loading-state">
+          <div class="spinner"></div>
+          <p>Loading document...</p>
+        </div>
+      </article>
     </main>
-</body>
+  </body>
+  <noscript>
+    <div class="alert alert-warning">
+      <strong>Warning:</strong> JavaScript is required to run MarkPaper. Please enable it in your browser settings.
+    </div>
+  </noscript>
+
 </html>
 ```
 
@@ -45,12 +66,12 @@ To use MarkPaper, include the CSS and JS files in your HTML document. You also n
 
 MarkPaper reads the `?file=` URL parameter to determine which Markdown file to render.
 
-* **Default:** `index.html` (loads `readme.md` or default content)
-* **Specific File:** `index.html?file=my-paper.md`
+* **Default:** `http://127.0.0.1:5500/` (loads `readme.md`)
+* **Specific File:** `http://127.0.0.1:5500/?file=my-paper.md`
 
 ---
 
-## 2. Document Structure & Metadata
+## Document Structure & Metadata
 
 At the very top of your Markdown file, you can define metadata. This will automatically generate a professional header.
 
@@ -58,9 +79,10 @@ At the very top of your Markdown file, you can define metadata. This will automa
 
 ```markdown
 # My Research Paper Title
-author: John Doe
+
+author: Tetsuaki Baba
 date: 2025-12-10
-institution: University of Technology
+institution: Tokyo Metropolitan University
 editor: Jane Smith
 ```
 
@@ -70,7 +92,7 @@ editor: Jane Smith
 
 ---
 
-## 3. Typography & Formatting
+## Typography & Formatting
 
 MarkPaper supports standard Markdown formatting and some extended HTML styling.
 
@@ -79,7 +101,7 @@ MarkPaper supports standard Markdown formatting and some extended HTML styling.
 ```markdown
 # Heading Level 1
 ## Heading Level 2 (Auto-numbered in TOC)
-### Heading Level 3 (Indented in TOC)
+### Heading Level 3 (Auto-numbered in TOC)
 #### Heading Level 4
 ```
 
@@ -97,7 +119,7 @@ You can also use <mark>highlighted text</mark>, <u>underlined text</u>, <sub>sub
 
 ---
 
-## 4. Lists
+## Lists
 
 ### Standard Lists
 
@@ -117,13 +139,13 @@ You can also use <mark>highlighted text</mark>, <u>underlined text</u>, <sub>sub
 
 * **Unordered List Item 1**
 * Unordered List Item 2
-    * Nested Item A
-    * Nested Item B
+  * Nested Item A
+  * Nested Item B
 
-1.  **Ordered List Item 1**
-2.  Ordered List Item 2
-    1.  Nested Ordered Item 2.1
-    2.  Nested Ordered Item 2.2
+1. **Ordered List Item 1**
+2. Ordered List Item 2
+    1. Nested Ordered Item 2.1
+    2. Nested Ordered Item 2.2
 
 ### Task Lists (Checkboxes)
 
@@ -135,27 +157,27 @@ You can also use <mark>highlighted text</mark>, <u>underlined text</u>, <sub>sub
 
 **Result:**
 
-- [x] Analyze requirements
-- [x] Design architecture
-- [ ] Write documentation
+* [x] Analyze requirements
+* [x] Design architecture
+* [ ] Write documentation
 
 ---
 
-## 5. Media (Images & Video)
+## Media (Images & Video)
 
 ### Images
 
 Standard markdown syntax is supported. You can also specify the width using curly braces syntax `{width=...}`. Captions are automatically generated from the alt text.
 
 ```markdown
-![A beautiful landscape](https://tetsuakibaba.jp/assets/images/research/2021rc.png)
+![Full size centered image](https://tetsuakibaba.jp/assets/images/research/2021rc.png)
 
 ![Small centered image](https://tetsuakibaba.jp/assets/images/research/2021rc.png){width="50%"}
 ```
 
 **Result:**
 
-![A beautiful landscape](https://tetsuakibaba.jp/assets/images/research/2021rc.png)
+![Full size centered image](https://tetsuakibaba.jp/assets/images/research/2021rc.png)
 
 ![Small centered image](https://tetsuakibaba.jp/assets/images/research/2021rc.png){width="50%"}
 
@@ -164,9 +186,9 @@ Standard markdown syntax is supported. You can also specify the width using curl
 MarkPaper automatically detects YouTube and Vimeo links when placed on their own line and converts them into responsive iframes.
 
 ```markdown
-[https://www.youtube.com/watch?v=Xd2xr7zIFyk](https://www.youtube.com/watch?v=Xd2xr7zIFyk)
+https://www.youtube.com/watch?v=Xd2xr7zIFyk
 
-[https://vimeo.com/858066420](https://vimeo.com/858066420)
+https://vimeo.com/858066420
 ```
 
 **Result:**
@@ -177,20 +199,13 @@ https://vimeo.com/858066420
 
 ---
 
-## 6. Code Highlighting
+## Code Highlighting
 
 MarkPaper uses **Prism.js** for syntax highlighting. It supports copy-to-clipboard functionality and horizontal scrolling.
 
-### Inline Code
-
-```markdown
-Use `console.log()` to debug.
-```
-
-**Result:** Use `console.log()` to debug.
-
 ### Code Blocks
 
+#### Javascript example
 ````markdown
 ```javascript
 function greet(name) {
@@ -208,6 +223,8 @@ function greet(name) {
 }
 console.log(greet("MarkPaper"));
 ```
+
+#### Python example
 
 ````markdown
 ```python
@@ -231,7 +248,7 @@ def factorial(n):
 
 ---
 
-## 7. Mathematical Notation (LaTeX)
+## Mathematical Notation (LaTeX)
 
 Powered by **KaTeX**, you can write high-quality mathematical equations directly in Markdown.
 
@@ -277,7 +294,7 @@ $$
 
 ---
 
-## 8. Tables
+## Tables
 
 Tables are styled for readability with sticky headers and hover effects.
 
@@ -299,7 +316,7 @@ Tables are styled for readability with sticky headers and hover effects.
 
 ---
 
-## 9. GitHub-Style Alerts
+## GitHub-Style Alerts
 
 Use blockquotes with specific tags to create colorful alert boxes.
 
@@ -339,7 +356,7 @@ Use blockquotes with specific tags to create colorful alert boxes.
 
 ---
 
-## 10. Advanced Elements
+## Advanced Elements
 
 ### Footnotes
 
@@ -359,7 +376,7 @@ Here is a statement that requires a citation[^1].
 
 ### Collapsible Details
 
-MarkPaper supports the HTML `<details>` and `<summary>` tags for hiding complex information.
+MarkPaper supports the HTML tags for hiding complex information.
 
 ```html
 <details>
@@ -382,26 +399,10 @@ MarkPaper supports the HTML `<details>` and `<summary>` tags for hiding complex 
 * Torque: 500 Nm
 
 </details>
-
-### Raw HTML (Whitelisted)
-
-You can use safe HTML tags for specific layout needs.
-
-```html
-<div style="background: #f0f0f0; padding: 10px; border-radius: 5px; text-align: center;">
-    This is a custom <strong>div</strong> element.
-</div>
-```
-
-**Result:**
-
-<div style="background: #f0f0f0; padding: 10px; border-radius: 5px; text-align: center;">
-    This is a custom <strong>div</strong> element.
-</div>
 
 ---
 
-## 11. Customization
+## Customization
 
 You can adjust the theme settings via the **Settings Button** (gear icon) in the top right corner, or by modifying the CSS variables in `css/markpaper.css`.
 
@@ -417,3 +418,9 @@ You can adjust the theme settings via the **Settings Button** (gear icon) in the
 ## License
 
 MIT License.
+
+## Authors
+
+Original project by: **[Tetsuaki Baba](https://tetsuakibaba.jp)**
+
+Refactored by: **[Rubens Braz](https://rubensbraz.com)**
