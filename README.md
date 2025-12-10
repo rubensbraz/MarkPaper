@@ -129,10 +129,12 @@ You can also use <mark>highlighted text</mark>, <u>underlined text</u>, <sub>sub
     * Nested Item A
     * Nested Item B
 
-1.  **Ordered List Item 1**
-2.  Ordered List Item 2
-    1.  Nested Ordered Item 2.1
-    2.  Nested Ordered Item 2.2
+1. **Ordered List Item 1**
+1. Ordered List Item 2
+    1. Nested Ordered Item 2.1
+    1. Nested Ordered Item 2.2
+        1. Nested Ordered Item 2.2.1
+        1. Nested Ordered Item 2.2.2
 ```
 
 **Result:**
@@ -143,9 +145,11 @@ You can also use <mark>highlighted text</mark>, <u>underlined text</u>, <sub>sub
   * Nested Item B
 
 1. **Ordered List Item 1**
-2. Ordered List Item 2
+1. Ordered List Item 2
     1. Nested Ordered Item 2.1
-    2. Nested Ordered Item 2.2
+    1. Nested Ordered Item 2.2
+        1. Nested Ordered Item 2.2.1
+        1. Nested Ordered Item 2.2.2
 
 ### Task Lists (Checkboxes)
 
@@ -206,6 +210,7 @@ MarkPaper uses **Prism.js** for syntax highlighting. It supports copy-to-clipboa
 ### Code Blocks
 
 #### Javascript example
+
 ````markdown
 ```javascript
 function greet(name) {

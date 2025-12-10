@@ -380,6 +380,7 @@ class MarkPaperParser {
 
   /**
    * Processes unordered and ordered lists, including nesting.
+   * Uses adaptive indentation to prevent numbering gaps.
    * @param {string} line - Current line.
    * @returns {boolean} - True if line was consumed.
    */
@@ -393,21 +394,56 @@ class MarkPaperParser {
     else { return false; }
 
     this.closeBlockquote(); this.closeAlert(); this.closeTable();
+
     const indent = match[1].length;
-    const level = Math.floor(indent / 2); // 2 spaces = 1 nesting level
 
-    // Close nested levels if indentation decreases
-    while (this.state.listStack.length > level + 1) { this.closeOneListLevel(); }
+    // Adaptive Indentation Logic:
+    // Instead of hardcoding "2 spaces = 1 level", we compare with the current stack
+    let targetLevel = 0;
 
-    // Open new level if indentation increases
-    if (this.state.listStack.length <= level) {
-      if (this.state.listStack.length === level + 1 && this.state.listStack[level].type !== type) {
-        this.closeOneListLevel(); // Close mismatching type
+    if (this.state.listStack.length > 0) {
+      // Find the deepest list in the stack that has indentation <= current line
+      let bestMatchIndex = -1;
+
+      for (let i = this.state.listStack.length - 1; i >= 0; i--) {
+        const stackItem = this.state.listStack[i];
+        if (indent > stackItem.indent) {
+          // It's a child of this item -> Target is one level deeper
+          bestMatchIndex = i + 1;
+          break;
+        } else if (indent === stackItem.indent) {
+          // It's a sibling of this item -> Target is same level
+          bestMatchIndex = i;
+          break;
+        }
       }
-      if (this.state.listStack.length <= level) {
+
+      // If indent is smaller than everything, it resets to root (level 0)
+      if (bestMatchIndex === -1 && indent < this.state.listStack[0].indent) {
+        targetLevel = 0;
+      } else {
+        // Default to calculated index, or 0 if stack was empty/logic fell through
+        targetLevel = bestMatchIndex > -1 ? bestMatchIndex : 0;
+      }
+    }
+
+    // Close nested levels if we need to go back up
+    while (this.state.listStack.length > targetLevel + 1) {
+      this.closeOneListLevel();
+    }
+
+    // Open new level if needed (Target is deeper than current)
+    // Using 'while' handles cases where we might need to recover structure,
+    // though adaptive logic usually results in just 1 iteration max.
+    while (this.state.listStack.length <= targetLevel) {
+      if (this.state.listStack.length === targetLevel + 1 && this.state.listStack[targetLevel].type !== type) {
+        this.closeOneListLevel(); // Switch type (ul <-> ol)
+      }
+
+      if (this.state.listStack.length <= targetLevel) {
         this.html += `<${type}>\n`;
-        this.state.listStack.push({ type: type, level: level });
-        if (type === 'ol') this.state.listCounters[level] = 1;
+        // Store 'indent' in the stack to compare against future lines
+        this.state.listStack.push({ type: type, level: targetLevel, indent: indent });
       }
     }
 
