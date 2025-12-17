@@ -768,13 +768,12 @@ table code {
     transition: color 0.2s ease;
 }
 
-.markpaper-footer a:hover {
-    color: var(--accent-hover-color);
-    text-decoration: underline;
-}
-
 .markpaper-footer a:visited {
     color: var(--accent-visited-color);
+}
+
+#generated-by {
+    font-size: 1.1em;
 }
 
 /* ------------------------------------------------------------------

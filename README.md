@@ -1,6 +1,6 @@
 # MarkPaper Showcase & Documentation
 
-author: Tetsuaki Baba
+author: Tetsuaki Baba & Rubens Braz
 
 date: 2025-12-10
 
@@ -89,7 +89,7 @@ At the very top of your Markdown file, you can define metadata. This will automa
 ```markdown
 # MarkPaper Showcase & Documentation
 
-author: Tetsuaki Baba
+author: Tetsuaki Baba & Rubens Braz
 
 date: 2025-12-10
 
@@ -436,6 +436,10 @@ MIT License.
 
 ## Authors
 
-Original project by: **[Tetsuaki Baba](https://tetsuakibaba.jp)**
+#### Original project by:
 
-Refactored by: **[Rubens Braz](https://rubensbraz.com)**
+**Tetsuaki Baba:** [Site](https://tetsuakibaba.jp) / [Original Repository](https://github.com/TetsuakiBaba/MarkPaper)
+
+#### Refactored by:
+
+**Rubens Braz:** [Site](https://rubensbraz.com) / [Refactored Repository (this version)](https://github.com/rubensbraz/MarkPaper)
