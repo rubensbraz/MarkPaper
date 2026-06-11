@@ -73,11 +73,19 @@ To use MarkPaper, include the CSS and JS files in your HTML document. You also n
 
 ### Loading Content
 
-MarkPaper reads the `?file=` URL parameter to determine which Markdown file to render.
+There are three ways to load a document:
+
+**1. URL parameter.** MarkPaper reads the `?file=` parameter to fetch and render a Markdown file from the same origin.
 
 * **Default:** `http://127.0.0.1:5500/` (loads `README.md`)
 * **Specific File:** `http://127.0.0.1:5500/?file=my-paper.md`
-* **Content Folder:** bare file names are first searched in `content/`, then in the project root.
+* **Subfolder:** `http://127.0.0.1:5500/?file=content/my-paper.md`
+
+For security, the `?file=` value must be a **relative** path ending in `.md`, `.markdown`, or `.txt`. Absolute URLs, protocol-relative URLs (`//host/...`), and parent traversal (`../`) are rejected.
+
+**2. Upload button.** Click the **upload icon** (top right) to open a local Markdown file from your device and render it instantly. Nothing is uploaded to a server — the file is read entirely in your browser.
+
+**3. Drag & drop.** Drag a `.md` file anywhere onto the page and drop it to render it on the fly.
 
 ---
 
@@ -312,7 +320,7 @@ $$
 
 ## Tables
 
-Tables are styled for readability with sticky headers and hover effects.
+Tables are styled for readability with hover effects. Column alignment is controlled by the separator row: `:---` (left), `:---:` (center), and `---:` (right).
 
 ```markdown
 | ID | Model Name | Accuracy | Status |

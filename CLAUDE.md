@@ -9,15 +9,16 @@ MarkPaper is a lightweight, fully client-side Markdown renderer that turns `.md`
 
 | File | Role |
 | --- | --- |
-| `index.html` | Entry point. Loads `markpaper.css`/`markpaper.js` plus PrismJS and KaTeX from CDNs. |
-| `markpaper.js` | All application logic: parser, UI, settings, and bootstrap. |
+| `index.html` | Entry point. Sets the CSP and loads `markpaper.css`/`markpaper.js` plus SRI-pinned PrismJS and KaTeX from CDNs. |
+| `markpaper.js` | All application logic: parser, UI, settings, upload, and bootstrap. |
 | `markpaper.css` | All styling, fully driven by CSS variables. |
 | `README.md` | User guide **and** live demo document (the default file rendered by the app). |
-| `tests/parser.test.js` | Parser smoke tests, runnable with plain Node. |
+| `tests/parser.test.js` | Parser/security smoke tests, runnable with plain Node. |
+| `.github/workflows/ci.yml` | CI: syntax check + test suite on push/PR. |
 | `CHANGELOG.md` | Release history (Keep a Changelog format). |
 | `assets/` | Favicons and web manifest only. |
 
-The app reads the `?file=` URL parameter (default `README.md`), looks for bare file names in `content/` first and then in the project root, parses the Markdown, and injects the HTML into `<article id="content">`.
+A document reaches the renderer three ways: the `?file=` URL parameter (default `README.md`, validated by `isSafeMarkdownPath`), the upload button, or drag-and-drop. The parsed HTML is injected into `<article id="content">`.
 
 ## Fundamental Rules (mandatory)
 
@@ -28,15 +29,18 @@ The app reads the `?file=` URL parameter (default `README.md`), looks for bare f
    2. `PARSER CORE` — `MarkPaperParser`.
    3. `UI & DOM CONTROLLER` — `MarkPaperUI`.
    4. `SETTINGS CONTROLLER` — `SettingsController`.
-   5. `APPLICATION ENTRY` — the bootstrap IIFE (the only place that touches `fetch`/`DOMContentLoaded`).
+   5. `APPLICATION ENTRY` — the bootstrap IIFE (the only place that touches `fetch`/`DOMContentLoaded`), guarded by `if (typeof document === 'undefined') return;` so the file can be required in Node. The file ends with a `module.exports` guarded by `typeof module` for the test harness; the browser never reaches it.
 4. **No magic values in logic.** Every constant lives in `CONFIG`:
    - Markdown regexes → `CONFIG.PATTERNS` (each with a short trailing comment);
    - UI timings and layout values → `CONFIG.UI` (suffix the key with its unit: `_MS`, `_PX`);
+   - User-facing text → `CONFIG.STRINGS` (no hardcoded UI strings in handlers or generated markup; keeps wording consistent and i18n-ready);
    - LocalStorage keys → `CONFIG.STORAGE_KEYS` (values prefixed `markpaper_`);
+   - Upload constraints → `CONFIG.UPLOAD`; allowlists → `CONFIG.ALLOWED_*` / `CONFIG.EMBED_HOST_ALLOWLIST` / `CONFIG.METADATA_KEYS`;
    - External theme URLs → `CONFIG.PRISM_THEMES`;
    - Theme variable sets → `CONFIG.DEFAULTS` / `CONFIG.DARK_PRESET` (both must stay in sync with `:root` in `markpaper.css`).
 5. **The parser is a line-based state machine.** `parse()` dispatches each line through the numbered handler chain (`processCodeBlock` → … → paragraph fallback). Every `processX(line, ...)` handler returns a `boolean`: `true` means the line was consumed. Buffered blocks (code, math, table, blockquote, alert, lists) are flushed by their matching `flushX`/`closeX` method. Any new state field **must** be initialized in `reset()` — `parse()` calls `reset()` and must stay idempotent.
 6. **Parser output is a string.** `MarkPaperParser` never touches the DOM. All DOM access belongs to `MarkPaperUI`/`SettingsController`/the entry IIFE.
+7. **UI lifecycle is split in two.** `MarkPaperUI.initChrome()` builds the persistent chrome and global listeners **once**; `renderDocument()` wires everything that depends on freshly rendered content and is **safe to call repeatedly** (uploads, error pages). Per-document setup must not add `window`/`document` listeners (they would accumulate) — register those in `initChrome()` and have them query the live DOM. Rendering text is delegated from the UI back to the entry via the `onUploadDocument` callback so the parser stays out of the UI layer.
 
 ## Security Rules (mandatory — XSS prevention)
 
@@ -46,9 +50,13 @@ The app reads the `?file=` URL parameter (default `README.md`), looks for bare f
    - `sanitizeHTML(text)` — allowlist filtering of raw HTML.
 2. **Allowlist only.** Permitted tags/attributes are defined exclusively in `CONFIG.ALLOWED_TAGS` / `CONFIG.ALLOWED_ATTRIBUTES`. Never switch to a denylist approach. Adding a tag/attribute requires considering its XSS surface.
 3. **Every URL placed in `href`/`src` must go through `sanitizeUrl()`** (which delegates to `isDangerousUrl()`). Blocked protocols: `javascript:`, `vbscript:`, `data:`, `about:` — including whitespace/control-character obfuscation and HTML-entity obfuscation (`&colon;`, decimal `&#...;`, hex `&#x...;`), which are decoded before the check exactly as a browser would.
-4. **Protection maps in `escapeInline` use unique placeholders** (`__MATH_n__`, `__TAG_n__`, `__CODE_n__`) and must be restored with a **function replacer** (`replace(key, () => val)`) so `$`-substitution patterns in the values cannot be interpreted.
-5. Generated links to external content always get `target="_blank" rel="noopener noreferrer"`.
-6. Any change to sanitization/escaping must keep all security tests in `tests/parser.test.js` green and add a test for the new surface.
+4. **`<iframe>` in raw HTML is host-gated.** `sanitizeHTML` only keeps an iframe whose `src` resolves (over HTTPS) to a host in `CONFIG.EMBED_HOST_ALLOWLIST`; everything else is escaped. Add a host to the allowlist deliberately, never widen to `*`.
+5. **Inline `style` is property-gated.** `sanitizeStyle()` keeps only `CONFIG.ALLOWED_STYLE_PROPS` and drops `url(...)`, `expression(...)`, `javascript:`, and `@import`. Never allow `position`/`inset` (overlay/clickjacking surface). The `{width=...}` image attribute is validated against `CONFIG.PATTERNS.DIMENSION`.
+6. **The `?file=` parameter is validated by `isSafeMarkdownPath()`** before any `fetch`: relative path only, no scheme, no `//`, no `..`, no control chars, and a `.md`/`.markdown`/`.txt` extension. This prevents loading third-party content onto our origin.
+7. **Protection maps in `escapeInline` use Private-Use-Area sentinels** (`PH_OPEN`/`PH_CLOSE`, built with `String.fromCharCode` so the source carries no literal escapes) to make placeholder collisions with document text impossible, and are restored with a **function replacer** (`replace(key, () => val)`) so `$`-substitution patterns in the values cannot be interpreted.
+8. Generated links to external content always get `target="_blank" rel="noopener noreferrer"`.
+9. **Defense in depth at the delivery layer:** `index.html` ships a `Content-Security-Policy` meta tag (scripts/styles limited to self + the two pinned CDNs; embeds to YouTube/Vimeo; `object-src 'none'`) and `integrity`/`crossorigin` (SRI) on every statically-referenced CDN asset. When bumping a CDN version, recompute the SRI hash. The dynamically-swapped Prism theme stylesheet cannot carry SRI — keep it on an allowlisted CDN origin.
+10. Any change to sanitization/escaping must keep all security tests in `tests/parser.test.js` green and add a test for the new surface.
 
 ## Docstring Rules (JSDoc — mandatory)
 
@@ -99,7 +107,7 @@ close() { ... }
 
 Additional rules:
 
-- **`@private` on every internal method.** Public APIs are: `MarkPaperParser.parse()`, `MarkPaperUI.init()`, `SettingsController.init()/toggle()/close()`, and constructors. Everything else carries `@private` (and therefore uses the multi-line form).
+- **`@private` on every internal method.** Public APIs are: `MarkPaperParser.parse()`, `MarkPaperUI.initChrome()/renderDocument()`, `SettingsController.init()/toggle()/close()`, the top-level `isSafeMarkdownPath()`, and constructors. Everything else carries `@private` (and therefore uses the multi-line form).
 - **`@example` is required** on the main API surfaces (`parse`, `escapeInline`, `sanitizeUrl`) and encouraged on any method whose input/output mapping is not obvious. The example shows a call and the expected result in a `// ->` comment.
 - **`@typedef` for recurring object shapes** (`DocumentMeta`, `ListStackItem`, `ThemePrefs`), declared in section 1 right after `CONFIG`. Never use bare `{Object}` when a typedef exists or the shape repeats.
 - **`@throws`** must be documented if a method can throw to its caller (currently none do — keep it that way unless justified).
@@ -180,7 +188,7 @@ There is no TypeScript: **all type information lives in JSDoc braces**.
   | Parser — document | `document-header`, `author`, `date`, `institution`, `editor`, `markpaper-footer` |
   | Parser — blocks | `code-block-container`, `copy-btn` (+ `copied`), `task-list-item`, `image-figure`, `video-container`, `footnotes`, `footnote`, `footnote-ref` |
   | Parser — alerts | `alert`, `alert-{note,tip,important,warning,caution}`, `alert-header`, `alert-title`, `alert-content` |
-  | UI | `hamburger-btn`, `settings-btn`, `side-menu`, `side-menu-header`, `table-of-contents`, `overlay`, `reading-progress`, `heading-anchor`, `loading-state`, `spinner` |
+  | UI | `hamburger-btn`, `settings-btn`, `upload-btn`, `upload-input`, `side-menu`, `side-menu-header`, `table-of-contents`, `overlay`, `reading-progress`, `heading-anchor`, `loading-state`, `spinner`, `drop-zone`, `drop-zone-inner`, `drag-active` (on `<body>`) |
   | Settings | `settings-modal`, `settings-header`, `settings-body`, `setting-group`, `setting-actions`, `theme-buttons`, `btn-theme-light`, `btn-theme-dark`, `btn-reset`, `close-settings` |
 
 ## CSS Rules (mandatory)
@@ -191,8 +199,15 @@ There is no TypeScript: **all type information lives in JSDoc braces**.
 - **Units**: `rem`/`em` and `--baseline-unit` multiples for document content (typography, spacing); `px` is reserved for UI chrome (fixed buttons, menu widths), borders, and shadows, which must not scale with the reader's font-size setting. Font sizes use `clamp()` for fluid scaling.
 - **Property order** inside each rule (applies to new and edited rules): positioning/stacking → box model (display, size, margin, padding) → typography → color/visual → transition/animation.
 - The JS-controlled variables and their defaults are mirrored in `CONFIG.DEFAULTS`/`CONFIG.DARK_PRESET` — keep all three lists in sync when adding one.
-- Responsive overrides live only in section 7 (`MEDIA QUERIES`), mobile-first breakpoints aligned with the existing ones.
+- Responsive overrides live in section 7 (`MEDIA QUERIES`); section 8 holds the `prefers-reduced-motion` block; section 9 holds the `@media print` rules. Keep the banner numbering in order.
 - Every selector must be reachable from markup the parser/UI can emit (see the contract table above) or from documented user-supplied HTML. Unused rules and variables are deleted.
+
+## Accessibility (mandatory)
+
+- Icon-only controls (hamburger, settings, upload) carry an `aria-label`; their inline `<svg>` is `aria-hidden="true"`.
+- The hamburger toggles `aria-expanded`; the settings modal has `role="dialog"` + `aria-label`; form controls in the modal use `<label for=...>`.
+- Honor user preferences: `prefers-reduced-motion` (no smooth scroll/transitions/animations — both in CSS and via `MarkPaperUI.scrollBehavior()`), and `prefers-color-scheme` (first-visit default theme in `SettingsController.loadPrefs`).
+- Decorative anchors that are also interactive (the heading `#` link) get a real `aria-label`, not `aria-hidden`.
 
 ## Naming Conventions
 
@@ -209,9 +224,12 @@ There is no TypeScript: **all type information lives in JSDoc braces**.
 
 ## Verification Checklist (before committing)
 
+CI (`.github/workflows/ci.yml`) runs steps 1–2 on every push/PR; run them locally first.
+
 1. `node --check markpaper.js` — must pass.
-2. `node tests/parser.test.js` — all tests must pass. Parser changes require new/updated tests, especially for the XSS vectors: `[x](javascript:alert(1))`, `[x](javascript&colon;alert(1))`, `[x](&#106;avascript:alert(1))`, `![x](javascript:alert(1))`, `<script>`, `<img onerror=...>` — none may survive into the output.
+2. `node tests/parser.test.js` — all tests must pass. Parser/security changes require new/updated tests, especially for the XSS vectors: `[x](javascript:alert(1))`, `[x](javascript&colon;alert(1))`, `[x](&#106;avascript:alert(1))`, `![x](javascript:alert(1))`, `<script>`, `<img onerror=...>`, `<iframe src="https://evil/">`, `<div style="position:fixed">` — none may survive into the output.
 3. Serve the folder with any static server (e.g. `python -m http.server` or VS Code Live Server) and open `index.html`:
-   - `README.md` renders fully (header, TOC, alerts, tables, math, code highlighting, footnotes, embeds);
-   - the hamburger menu, settings modal, theme presets (light/dark), copy buttons, and reading progress bar all work;
-   - no errors in the browser console.
+   - `README.md` renders fully (header, TOC, alerts, tables with alignment, math, code highlighting, footnotes, embeds);
+   - the hamburger menu, settings modal, theme presets (light/dark), copy buttons, reading progress bar, **upload button, and drag-and-drop** all work;
+   - **Print Preview** hides the chrome and shows link URLs;
+   - no errors or CSP violations in the browser console.
