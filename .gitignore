@@ -1,1 +1,4 @@
 .DS_Store
+
+# Local tooling (Claude Code preview/launch config, local settings)
+.claude/
