@@ -153,11 +153,11 @@ check('emphasis', html.includes('<strong>b</strong>') && html.includes('<em>i</e
 html = parser.parse('keep <mark>this</mark> visible');
 check('mark tag kept', html.includes('<mark>this</mark>'));
 
-// --- Placeholder collision safety (literal sentinel-like text) ---
+// --- Placeholder collision safety: no internal PUA sentinel leaks to output ---
 
-html = parser.parse('Literal __MATH_0__ and __TAG_0__ tokens.');
-check('literal placeholder-like text preserved',
-  html.includes('__MATH_0__') && html.includes('__TAG_0__'), html.slice(0, 200));
+html = parser.parse('Math $a+b$, code `x`, a <mark>tag</mark>, and **bold**.');
+const PH = String.fromCharCode(0xE000) + String.fromCharCode(0xE001);
+check('no PUA sentinel leaks into output', !html.includes(PH[0]) && !html.includes(PH[1]), JSON.stringify(html.slice(0, 200)));
 
 // --- Headings & metadata ---
 
@@ -203,6 +203,53 @@ check('footer links carry rel=noopener', (html.match(/rel="noopener noreferrer"/
 
 html = parser.parse('![cap](https://example.com/a.png)');
 check('img void element has no self-closing slash', html.includes('/>') === false || !/<img[^>]*\/>/.test(html), html.slice(0, 200));
+
+// --- Markdown correctness (v1.5.0 fixes) ---
+
+html = parser.parse('First line of one paragraph\nsecond line same paragraph.');
+check('soft-wrapped lines form one paragraph',
+  html.includes('<p>First line of one paragraph second line same paragraph.</p>'), html.slice(0, 200));
+
+html = parser.parse('Two spaces break  \nthis line.');
+check('two trailing spaces produce <br>', html.includes('<br>'), html.slice(0, 200));
+
+html = parser.parse('This is _italic_ and __bold__ here.');
+check('underscore emphasis', html.includes('<em>italic</em>') && html.includes('<strong>bold</strong>'), html.slice(0, 200));
+
+html = parser.parse('Keep snake_case_name literal.');
+check('intraword underscores stay literal', html.includes('snake_case_name') && !html.includes('<em>'), html.slice(0, 200));
+
+html = parser.parse('A ***bold italic*** word.');
+check('triple emphasis nests correctly', html.includes('<strong><em>bold italic</em></strong>'), html.slice(0, 200));
+
+html = parser.parse('Literal \\*stars\\* and \\_unders\\_ here.');
+check('backslash escapes literal punctuation', html.includes('*stars*') && !html.includes('<em>'), html.slice(0, 200));
+
+html = parser.parse('[text](https://example.com "My Title")');
+check('link title parsed not baked into href',
+  html.includes('href="https://example.com"') && html.includes('title="My Title"'), html.slice(0, 250));
+
+html = parser.parse('It costs $5 and then $10 total.');
+check('currency not parsed as math', html.includes('$5 and then $10') && !html.includes('<code>') && !html.includes('katex'), html.slice(0, 250));
+
+html = parser.parse('Mass-energy $E=mc^2$ holds.');
+check('real inline math still parsed', !html.includes('$E=mc^2$'), html.slice(0, 250));
+
+html = parser.parse('| a | b | c |\n| --- | --- | --- |\n| 1 |  | 3 |');
+check('empty interior table cell preserved', (html.match(/<td/g) || []).length === 3, html.slice(0, 400));
+
+html = parser.parse('## One\nRef[^x].\n\n## Two\nAgain[^x].\n\n[^x]: shared');
+const fnIds = [...html.matchAll(/id="(footnote-[^"]+)"/g)].map(m => m[1]);
+check('recurring footnote gets unique ids', fnIds.length === 2 && new Set(fnIds).size === 2, JSON.stringify(fnIds));
+
+html = parser.parse('    line one\n    line two');
+check('contiguous indented code is one block', (html.match(/code-block-container/g) || []).length === 1, html.slice(0, 300));
+
+html = parser.parse('See the [docs][ref] page.\n\n[ref]: https://example.com/docs');
+check('reference-style link resolved', html.includes('href="https://example.com/docs"') && html.includes('>docs</a>'), html.slice(0, 250));
+
+html = parser.parse('* a\n    * b\n* c');
+check('nested list nests inside parent li', /<li>a\s*<ul>/.test(html), html.slice(0, 300));
 
 // --- Full document ---
 
