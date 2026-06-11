@@ -18,6 +18,8 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/) and 
 
 ### Security
 
+- **Fix stored XSS via footnote ids**: the footnote reference/definition id was interpolated raw into `href`/`class`/`id` attributes after the escaping pass, allowing attribute breakout (e.g. `[^1" onfocus="alert(1)"]`). Ids are now escaped at every interpolation. (Found by an adversarial review pass.)
+- Harden `sanitizeUrl` to also escape `<`, `>`, and `'` (defense in depth against attribute breakout).
 - Validate the `?file=` parameter: only relative `.md`/`.markdown`/`.txt` paths are accepted (blocks third-party content injection on our origin, protocol-relative URLs, and `../` traversal).
 - Restrict user-authored `<iframe>` to allowlisted video hosts (YouTube/Vimeo).
 - Filter inline `style` attributes to a property allowlist (blocks `position` overlays, `url()` trackers, and CSS `expression`/`@import`).

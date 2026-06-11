@@ -984,7 +984,9 @@ class MarkPaperParser {
     this.html += '<div class="footnotes">\n';
     this.sectionFootnotes.forEach(id => {
       if (this.footnotesDef[id]) {
-        this.html += `<div class="footnote" id="footnote-${id}"><sup>${id}</sup> ${this.escapeInline(this.footnotesDef[id])}</div>\n`;
+        // SECURITY: escape the id before it reaches the id attribute / label.
+        const safeId = this.escapeHTML(id);
+        this.html += `<div class="footnote" id="footnote-${safeId}"><sup>${safeId}</sup> ${this.escapeInline(this.footnotesDef[id])}</div>\n`;
       }
     });
     this.html += '</div>\n';
@@ -1056,7 +1058,12 @@ class MarkPaperParser {
    */
   sanitizeUrl(url) {
     if (this.isDangerousUrl(url)) return '';
-    return url.trim().replace(/"/g, '&quot;');
+    // SECURITY: escape the characters that could break out of a quoted attribute.
+    return url.trim()
+      .replace(/"/g, '&quot;')
+      .replace(/'/g, '&#39;')
+      .replace(/</g, '&lt;')
+      .replace(/>/g, '&gt;');
   }
 
   /**
@@ -1229,7 +1236,10 @@ class MarkPaperParser {
     // Footnote references
     escaped = escaped.replace(/\[\^([^\]]+)\]/g, (match, id) => {
       if (!this.sectionFootnotes.includes(id)) this.sectionFootnotes.push(id);
-      return `<sup><a href="#footnote-${id}" class="footnote-ref">${id}</a></sup>`;
+      // SECURITY: this runs after the main escaping pass, so the captured id must
+      // be escaped here or it breaks out of the href/class attributes.
+      const safeId = this.escapeHTML(id);
+      return `<sup><a href="#footnote-${safeId}" class="footnote-ref">${safeId}</a></sup>`;
     });
 
     // Auto-link bare URLs; the two-alternative regex skips content inside HTML tags

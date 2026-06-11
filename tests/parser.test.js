@@ -60,6 +60,14 @@ check('onerror attribute stripped', !/onerror/i.test(html), html.slice(0, 200));
 html = parser.parse('Inline $<script>bad()</script>$ math');
 check('KaTeX fallback escaped', !html.includes('<script>'), html.slice(0, 300));
 
+// Footnote id must not break out of href/class attributes (reference + definition).
+// A real breakout would produce a raw-quote event handler; after escaping the
+// injected quotes become &quot; and stay inert inside the attribute value.
+html = parser.parse('x[^1" autofocus onfocus="alert(1)" a="]\n\n[^1]: def');
+check('footnote ref id cannot inject attributes', !html.includes('onfocus="'), html.slice(0, 400));
+html = parser.parse('y[^a" onmouseover="alert(1)" b="]\n\n[^a" onmouseover="alert(1)" b="]: payload');
+check('footnote definition id cannot inject attributes', !html.includes('onmouseover="'), html.slice(0, 500));
+
 // --- Security: iframe host allowlist (raw HTML) ---
 
 html = parser.parse('<iframe src="https://evil.example/x"></iframe>');
