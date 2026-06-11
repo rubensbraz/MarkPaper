@@ -3,8 +3,9 @@
 /**
  * @file markpaper.js
  * @description A clean and academic Markdown renderer for the web.
- * Includes support for extended syntax (alerts, footnotes), KaTeX, PrismJS, and theme management.
- * @version 1.3.0
+ * Includes support for extended syntax (alerts, footnotes), KaTeX, PrismJS,
+ * theme management, and local file upload (button + drag-and-drop).
+ * @version 1.4.0
  */
 
 // ============================================================================
@@ -12,8 +13,17 @@
 // ============================================================================
 
 /**
+ * Private Use Area sentinels that wrap protection placeholders in escapeInline().
+ * Built via String.fromCharCode so the source carries no literal escape sequences,
+ * and chosen from U+E000/U+E001 because they effectively never occur in Markdown.
+ * @constant {string}
+ */
+const PH_OPEN = String.fromCharCode(0xE000);
+const PH_CLOSE = String.fromCharCode(0xE001);
+
+/**
  * Global configuration object containing allowlists, regex patterns, theme
- * defaults, UI constants, and persistence keys.
+ * defaults, UI constants, persistence keys, and user-facing strings.
  * @constant {Object}
  */
 const CONFIG = {
@@ -52,6 +62,33 @@ const CONFIG = {
   ],
 
   /**
+   * CSS properties allowed inside a sanitized inline `style` attribute.
+   * SECURITY: blocks layout-hijack vectors such as position/inset overlays.
+   */
+  ALLOWED_STYLE_PROPS: [
+    'color', 'background-color', 'text-align', 'text-decoration',
+    'width', 'height', 'max-width', 'max-height',
+    'font-size', 'font-weight', 'font-style',
+    'margin', 'padding', 'border', 'border-radius', 'float'
+  ],
+
+  /**
+   * Hostnames permitted as the `src` of a user-authored <iframe>.
+   * SECURITY: restricts embeds to known video providers.
+   */
+  EMBED_HOST_ALLOWLIST: [
+    'www.youtube.com', 'youtube.com',
+    'www.youtube-nocookie.com', 'youtube-nocookie.com',
+    'player.vimeo.com'
+  ],
+
+  /**
+   * Metadata keys recognized in the header block directly below the H1.
+   * Lines with any other key are treated as normal content, not consumed.
+   */
+  METADATA_KEYS: ['author', 'date', 'institution', 'editor'],
+
+  /**
    * Regular expression patterns to identify Markdown syntax elements.
    * PERF: compiled once at load time; never define block patterns inside handlers.
    */
@@ -70,6 +107,7 @@ const CONFIG = {
     TABLE_ROW: /^\s*\|?(.+)\|?\s*$/, // Table row
     IMAGE: /^!\[([^\]]*)\]\(([^)]+)\)\s*(?:\{([^}]+)\})?$/, // Standalone image with optional {width=...}
     FOOTNOTE_DEF: /^\[\^([^\]]+)\]:\s*(.+)$/, // Footnote definition
+    DIMENSION: /^\d+(\.\d+)?(%|px|em|rem|vw|vh)$/, // Safe CSS length for {width=...}
     // Regex for auto-embedding videos (standalone lines)
     VIDEO_YOUTUBE: /^https?:\/\/(?:www\.|m\.)?(?:youtube\.com\/watch\?v=|youtu\.be\/)([\w-]+)(?:[\?&][\w=-]+)*$/,
     VIDEO_VIMEO: /^https?:\/\/(?:www\.)?vimeo\.com\/(\d+)$/,
@@ -124,6 +162,15 @@ const CONFIG = {
   },
 
   /**
+   * Constraints for local file upload (button and drag-and-drop).
+   */
+  UPLOAD: {
+    ACCEPT: '.md,.markdown,.mdown,.txt,text/markdown,text/plain',
+    EXT_RE: /\.(md|markdown|mdown|txt)$/i,
+    MAX_BYTES: 5 * 1024 * 1024 // 5 MB
+  },
+
+  /**
    * Behavioral constants for the UI layer.
    * Keeping timing and layout values here avoids magic numbers inside handlers.
    */
@@ -135,6 +182,25 @@ const CONFIG = {
     ANCHOR_FEEDBACK_MS: 500, // How long the heading anchor highlight stays visible
     TOC_SUBITEM_PADDING: '40px', // TOC H3 indentation (20px base + 20px indent)
     TOC_SUBITEM_FONT_SIZE: '0.9em' // TOC H3 font size
+  },
+
+  /**
+   * User-facing strings, centralized to keep wording consistent and i18n-ready.
+   */
+  STRINGS: {
+    LOADING: 'Loading document...',
+    COPY: 'Copy',
+    COPIED: 'Copied!',
+    FIG_PREFIX: 'Fig',
+    EDITED_BY: 'Edited by',
+    MENU: 'Menu',
+    SETTINGS: 'Settings',
+    TOGGLE_MENU: 'Toggle table of contents',
+    UPLOAD_TITLE: 'Open a Markdown file',
+    DROP_HINT: 'Drop your Markdown file to render it',
+    COPY_LINK: 'Copy link to this section',
+    MATH_ERROR: 'Error parsing math',
+    ALERT_TITLES: { note: 'Note', warning: 'Warning', important: 'Important', tip: 'Tip', caution: 'Caution' }
   }
 };
 
@@ -156,6 +222,29 @@ const CONFIG = {
  * @typedef {Object.<string, string>} ThemePrefs
  * Map of CSS variable names to their values, persisted in LocalStorage.
  */
+
+/**
+ * Validates a user-supplied `?file=` value before it reaches fetch().
+ * SECURITY: blocks absolute/protocol-relative URLs (third-party content injection
+ * on our origin), parent traversal, and non-Markdown targets.
+ * @param {string} path - The raw file parameter.
+ * @returns {boolean} - True if the path is a safe relative Markdown reference.
+ * @example
+ * isSafeMarkdownPath('paper.md');               // -> true
+ * isSafeMarkdownPath('https://evil.com/x.md');  // -> false
+ * isSafeMarkdownPath('../../etc/passwd');        // -> false
+ */
+function isSafeMarkdownPath(path) {
+  if (typeof path !== 'string' || path === '') return false;
+  if (/^[a-z][a-z0-9+.-]*:/i.test(path)) return false; // reject "scheme:" URLs
+  if (path.startsWith('/')) return false; // reject absolute and protocol-relative
+  if (path.includes('\\')) return false; // reject backslash paths
+  for (let i = 0; i < path.length; i++) {
+    if (path.charCodeAt(i) < 32) return false; // reject control characters
+  }
+  if (path.split('/').some(seg => seg === '..')) return false; // reject traversal
+  return CONFIG.UPLOAD.EXT_RE.test(path);
+}
 
 // ============================================================================
 // 2. PARSER CORE
@@ -195,7 +284,7 @@ class MarkPaperParser {
     this.state = {
       inCodeBlock: false, codeFence: '', codeLang: '', codeBuffer: [],
       inMathBlock: false, mathBuffer: [],
-      inTable: false, tableHeader: null, tableRows: [],
+      inTable: false, tableHeader: null, tableRows: [], tableAlign: [],
       inBlockquote: false, blockquoteBuffer: [],
       inAlert: false, alertType: '', alertBuffer: [],
       listStack: [] // Nested list levels (ListStackItem[])
@@ -384,7 +473,7 @@ class MarkPaperParser {
       !CONFIG.PATTERNS.LIST_OL.test(line)) {
       this.closeList();
       const codeText = line.replace(/^(    |\t)/, '');
-      this.html += `<div class="code-block-container"><button class="copy-btn">Copy</button><pre><code class="language-plaintext">${this.escapeHTML(codeText)}</code></pre></div>\n`;
+      this.html += `<div class="code-block-container"><button class="copy-btn">${CONFIG.STRINGS.COPY}</button><pre><code class="language-plaintext">${this.escapeHTML(codeText)}</code></pre></div>\n`;
       return true;
     }
     return false;
@@ -406,14 +495,15 @@ class MarkPaperParser {
       this.currentSectionLevel = 1;
       let metadata = {};
 
-      // Look ahead for metadata (author: ...)
+      // Look ahead for known metadata keys (author/date/institution/editor).
+      // Unknown "key: value" lines are left in place to render as content.
       let k = index + 1;
       while (k < lines.length) {
         const nextLine = lines[k].trim();
         if (nextLine === '') { k++; continue; }
         const metaMatch = nextLine.match(CONFIG.PATTERNS.METADATA);
-        if (metaMatch) {
-          metadata[metaMatch[1]] = metaMatch[2];
+        if (metaMatch && CONFIG.METADATA_KEYS.includes(metaMatch[1].toLowerCase())) {
+          metadata[metaMatch[1].toLowerCase()] = metaMatch[2];
           lines[k] = ''; // Consume line
           k++;
         } else { break; }
@@ -529,7 +619,7 @@ class MarkPaperParser {
   }
 
   /**
-   * Processes table rows and headers.
+   * Processes table rows, headers, and the alignment separator.
    * @private
    * @param {string} line - Current line.
    * @param {number} index - Current line index.
@@ -542,9 +632,19 @@ class MarkPaperParser {
     if (!match) return false;
     const cells = match[1].split('|').map(c => c.trim()).filter(c => c !== '');
 
-    // Detect separator line |---|---|
-    const isSeparator = cells.every(c => /^[-\s:]+$/.test(c));
-    if (isSeparator) return true; // Consume but do nothing
+    // Detect separator line |---|:--:|--:| and capture per-column alignment
+    const isSeparator = cells.length > 0 && cells.every(c => /^:?-+:?$/.test(c));
+    if (isSeparator) {
+      this.state.tableAlign = cells.map(c => {
+        const left = c.startsWith(':');
+        const right = c.endsWith(':');
+        if (left && right) return 'center';
+        if (right) return 'right';
+        if (left) return 'left';
+        return '';
+      });
+      return true; // Consume the separator without emitting a row
+    }
 
     this.closeList(); this.closeBlockquote(); this.closeAlert();
     if (!this.state.inTable) {
@@ -613,13 +713,16 @@ class MarkPaperParser {
     let style = '';
     if (attrs) {
       const w = attrs.match(/width\s*=\s*"?([^"}]+)"?/);
-      if (w) style = ` style="width: ${this.escapeHTML(w[1])};"`;
+      if (w) {
+        const dim = this.sanitizeDimension(w[1]);
+        if (dim) style = ` style="width: ${dim};"`;
+      }
     }
     this.html += `<figure class="image-figure">`;
     this.html += `<img src="${safeSrc}" alt="${this.escapeHTML(alt)}"${style}>`;
     if (alt && alt.trim()) {
       this.globalFigureNum++;
-      this.html += `<figcaption>Fig ${this.globalFigureNum} ${this.escapeHTML(alt)}</figcaption>`;
+      this.html += `<figcaption>${CONFIG.STRINGS.FIG_PREFIX} ${this.globalFigureNum} ${this.escapeHTML(alt)}</figcaption>`;
     }
     this.html += `</figure>\n`;
     return true;
@@ -702,7 +805,7 @@ class MarkPaperParser {
     const lang = rawLang === 'js' ? 'javascript' : rawLang === 'py' ? 'python' : rawLang;
     const langClass = ` class="language-${lang}"`;
 
-    this.html += `<div class="code-block-container"><button class="copy-btn">Copy</button><pre><code${langClass}>`;
+    this.html += `<div class="code-block-container"><button class="copy-btn">${CONFIG.STRINGS.COPY}</button><pre><code${langClass}>`;
     this.html += this.state.codeBuffer.map(l => this.escapeHTML(l)).join('\n');
     this.html += `</code></pre></div>\n`;
 
@@ -737,28 +840,30 @@ class MarkPaperParser {
   closeList() { while (this.state.listStack.length > 0) this.closeOneListLevel(); }
 
   /**
-   * Renders the buffered table data.
+   * Renders the buffered table data, applying per-column alignment.
    * @private
    */
   closeTable() {
     if (!this.state.inTable) return;
+    const alignAttr = (i) => this.state.tableAlign[i] ? ` style="text-align:${this.state.tableAlign[i]}"` : '';
+
     this.html += '<table>\n';
     if (this.state.tableHeader) {
       this.html += '<thead>\n<tr>\n';
-      this.state.tableHeader.forEach(h => this.html += `<th>${this.escapeInline(h)}</th>\n`);
+      this.state.tableHeader.forEach((h, i) => this.html += `<th${alignAttr(i)}>${this.escapeInline(h)}</th>\n`);
       this.html += '</tr>\n</thead>\n';
     }
     if (this.state.tableRows.length > 0) {
       this.html += '<tbody>\n';
       this.state.tableRows.forEach(row => {
         this.html += '<tr>\n';
-        row.forEach(cell => this.html += `<td>${this.escapeInline(cell)}</td>\n`);
+        row.forEach((cell, i) => this.html += `<td${alignAttr(i)}>${this.escapeInline(cell)}</td>\n`);
         this.html += '</tr>\n';
       });
       this.html += '</tbody>\n';
     }
     this.html += '</table>\n';
-    this.state.inTable = false; this.state.tableHeader = null; this.state.tableRows = [];
+    this.state.inTable = false; this.state.tableHeader = null; this.state.tableRows = []; this.state.tableAlign = [];
   }
 
   /**
@@ -779,8 +884,7 @@ class MarkPaperParser {
    */
   closeAlert() {
     if (!this.state.inAlert) return;
-    const titles = { 'note': 'Note', 'warning': 'Warning', 'important': 'Important', 'tip': 'Tip', 'caution': 'Caution' };
-    const title = titles[this.state.alertType] || 'Alert';
+    const title = CONFIG.STRINGS.ALERT_TITLES[this.state.alertType] || 'Alert';
 
     this.html += `<div class="alert alert-${this.state.alertType}">`;
     this.html += `<div class="alert-header"><span class="alert-title">${title}</span></div>`;
@@ -832,7 +936,7 @@ class MarkPaperParser {
     if (meta.author) h += `<div class="author">${this.escapeHTML(meta.author)}</div>\n`;
     if (meta.date) h += `<div class="date">${this.escapeHTML(meta.date)}</div>\n`;
     if (meta.institution) h += `<div class="institution">${this.escapeHTML(meta.institution)}</div>\n`;
-    if (meta.editor) h += `<div class="editor">Edited by ${this.escapeHTML(meta.editor)}</div>\n`;
+    if (meta.editor) h += `<div class="editor">${CONFIG.STRINGS.EDITED_BY} ${this.escapeHTML(meta.editor)}</div>\n`;
     h += `</header>\n`;
     return h;
   }
@@ -862,11 +966,12 @@ class MarkPaperParser {
    * @returns {string} - HTML string.
    */
   generateFooter() {
+    const rel = 'rel="noopener noreferrer"';
     return `
     <footer class="markpaper-footer">
-      <p id="generated-by">Generated by <a href="https://github.com/rubensbraz/MarkPaper" target="_blank">MarkPaper</a>.</p><br>
-      <p><b>Original project: <a href="https://github.com/TetsuakiBaba/MarkPaper" target="_blank">MarkPaper (Tetsuaki Baba)</a>.</b></p>
-      <p><b>Refactor (this version): <a href="https://github.com/rubensbraz/MarkPaper" target="_blank">MarkPaper (Rubens Braz)</a>.</b></p>
+      <p id="generated-by">Generated by <a href="https://github.com/rubensbraz/MarkPaper" target="_blank" ${rel}>MarkPaper</a>.</p><br>
+      <p><b>Original project: <a href="https://github.com/TetsuakiBaba/MarkPaper" target="_blank" ${rel}>MarkPaper (Tetsuaki Baba)</a>.</b></p>
+      <p><b>Refactor (this version): <a href="https://github.com/rubensbraz/MarkPaper" target="_blank" ${rel}>MarkPaper (Rubens Braz)</a>.</b></p>
     </footer>`;
   }
 
@@ -903,7 +1008,7 @@ class MarkPaperParser {
       return katex.renderToString(tex, { displayMode: displayMode, throwOnError: false });
     } catch (e) {
       console.error('MarkPaper: KaTeX rendering failed', e);
-      return `<span style="color:red">Error parsing math</span>`;
+      return `<span style="color:red">${CONFIG.STRINGS.MATH_ERROR}</span>`;
     }
   }
 
@@ -926,15 +1031,18 @@ class MarkPaperParser {
    * @returns {boolean} - True if the URL must be blocked.
    */
   isDangerousUrl(url) {
-    // SECURITY: decode entity obfuscation and strip control characters the same
-    // way browsers do before testing (e.g. "java\tscript:", "&#106;avascript:").
-    const normalized = url
+    // SECURITY: decode HTML-entity obfuscation the way a browser would, then strip
+    // whitespace and C0 control characters (codes <= 32) that browsers also ignore.
+    const decoded = url
       .replace(/&#x([0-9a-f]+);?/gi, (m, code) => String.fromCharCode(parseInt(code, 16)))
       .replace(/&#(\d+);?/g, (m, code) => String.fromCharCode(parseInt(code, 10)))
       .replace(/&tab;|&newline;/gi, '')
-      .replace(/&colon;/gi, ':')
-      .replace(/[\s\u0000-\u001f]+/g, '');
-    return /^(javascript|vbscript|data|about):/i.test(normalized);
+      .replace(/&colon;/gi, ':');
+    let cleaned = '';
+    for (let i = 0; i < decoded.length; i++) {
+      if (decoded.charCodeAt(i) > 32) cleaned += decoded[i];
+    }
+    return /^(javascript|vbscript|data|about):/i.test(cleaned);
   }
 
   /**
@@ -952,8 +1060,56 @@ class MarkPaperParser {
   }
 
   /**
+   * Validates a CSS length used by the {width=...} image syntax.
+   * @private
+   * @param {string} value - The raw dimension string.
+   * @returns {string} - The validated dimension, or an empty string when invalid.
+   */
+  sanitizeDimension(value) {
+    const trimmed = value.trim();
+    return CONFIG.PATTERNS.DIMENSION.test(trimmed) ? trimmed : '';
+  }
+
+  /**
+   * Filters an inline `style` attribute down to an allowlist of safe properties.
+   * SECURITY: drops position/inset overlays, url() trackers, and CSS expressions.
+   * @private
+   * @param {string} value - The raw style attribute value.
+   * @returns {string} - The sanitized style declaration, or an empty string.
+   */
+  sanitizeStyle(value) {
+    return value.split(';').map(decl => {
+      const idx = decl.indexOf(':');
+      if (idx < 0) return '';
+      const prop = decl.slice(0, idx).trim().toLowerCase();
+      const val = decl.slice(idx + 1).trim();
+      if (!CONFIG.ALLOWED_STYLE_PROPS.includes(prop)) return '';
+      if (/url\s*\(|expression\s*\(|javascript:|@import/i.test(val)) return '';
+      return `${prop}: ${val}`;
+    }).filter(Boolean).join('; ');
+  }
+
+  /**
+   * Checks whether an <iframe> src points at an allowlisted embed host.
+   * @private
+   * @param {string} url - The iframe src value.
+   * @returns {boolean} - True if the host is a permitted video provider over HTTPS.
+   */
+  isAllowedEmbedHost(url) {
+    try {
+      // Resolve against a sentinel base so relative URLs land on a blocked host.
+      const u = new URL(url, 'https://markpaper.invalid');
+      if (u.protocol !== 'https:') return false;
+      return CONFIG.EMBED_HOST_ALLOWLIST.includes(u.hostname.toLowerCase());
+    } catch (e) {
+      return false;
+    }
+  }
+
+  /**
    * Sanitizes an HTML string using an allowlist approach.
-   * Removes disallowed tags and dangerous attributes (on*, javascript:, data:).
+   * Removes disallowed tags, dangerous attributes (on*, javascript:, data:),
+   * unsafe inline styles, and iframes that target non-allowlisted hosts.
    * @private
    * @param {string} text - Raw HTML string.
    * @returns {string} - Sanitized HTML string.
@@ -961,10 +1117,19 @@ class MarkPaperParser {
   sanitizeHTML(text) {
     return text.replace(/<(\/?)([\w-]+)([^>]*)>/gi, (match, slash, tag, attrs) => {
       const tagLower = tag.toLowerCase();
+      const escapeTag = () => match.replace(/</g, '&lt;').replace(/>/g, '&gt;');
+
       // Filter tag name
-      if (!CONFIG.ALLOWED_TAGS.includes(tagLower)) return match.replace(/</g, '&lt;').replace(/>/g, '&gt;');
+      if (!CONFIG.ALLOWED_TAGS.includes(tagLower)) return escapeTag();
 
       if (slash === '/') return `</${tag}>`;
+
+      // SECURITY: only allow iframes that embed allowlisted video hosts
+      if (tagLower === 'iframe') {
+        const srcMatch = attrs.match(/\bsrc\s*=\s*(?:"([^"]*)"|'([^']*)'|([^\s>]+))/i);
+        const src = srcMatch ? (srcMatch[1] || srcMatch[2] || srcMatch[3] || '') : '';
+        if (!this.isAllowedEmbedHost(src)) return escapeTag();
+      }
 
       let safeAttrs = '';
       if (attrs.trim()) {
@@ -974,13 +1139,17 @@ class MarkPaperParser {
             const parts = attrMatch.trim().match(/^([^=\s]+)(?:\s*=\s*(?:"([^"]*)"|'([^']*)'|([^\s>]+)))?$/);
             if (parts) {
               const name = parts[1].toLowerCase();
-              const val = parts[2] || parts[3] || parts[4] || '';
+              let val = parts[2] || parts[3] || parts[4] || '';
               // Filter attribute name
-              if (CONFIG.ALLOWED_ATTRIBUTES.includes(name)) {
-                // SECURITY: filter dangerous protocols on URL-bearing attributes
-                if ((name === 'href' || name === 'src') && this.isDangerousUrl(val)) return;
-                safeAttrs += ` ${name}="${val.replace(/"/g, '&quot;')}"`;
+              if (!CONFIG.ALLOWED_ATTRIBUTES.includes(name)) return;
+              // SECURITY: filter dangerous protocols on URL-bearing attributes
+              if ((name === 'href' || name === 'src') && this.isDangerousUrl(val)) return;
+              // SECURITY: filter inline styles down to safe properties
+              if (name === 'style') {
+                val = this.sanitizeStyle(val);
+                if (!val) return;
               }
+              safeAttrs += ` ${name}="${val.replace(/"/g, '&quot;')}"`;
             }
           });
         }
@@ -1005,7 +1174,7 @@ class MarkPaperParser {
 
     // Protect inline math ($...$)
     text = text.replace(/\$((?:[^\$]|\\\$)+)\$/g, (match, tex) => {
-      const key = `__MATH_${mCounter++}__`;
+      const key = `${PH_OPEN}MATH${mCounter++}${PH_CLOSE}`;
       mathMap.set(key, this.renderKaTeX(tex, false));
       return key;
     });
@@ -1017,7 +1186,7 @@ class MarkPaperParser {
     const tagMap = new Map(); let tCounter = 0;
     escaped = escaped.replace(/<(\/?)([\w-]+)([^>]*)>/g, (match, slash, tag) => {
       if (CONFIG.ALLOWED_TAGS.includes(tag.toLowerCase())) {
-        const key = `__TAG_${tCounter++}__`;
+        const key = `${PH_OPEN}TAG${tCounter++}${PH_CLOSE}`;
         tagMap.set(key, match);
         return key;
       }
@@ -1035,7 +1204,7 @@ class MarkPaperParser {
     // Protect inline code spans so their content skips Markdown and link parsing
     const codeMap = new Map(); let cCounter = 0;
     escaped = escaped.replace(/`([^`]+)`/g, (match, code) => {
-      const key = `__CODE_${cCounter++}__`;
+      const key = `${PH_OPEN}CODE${cCounter++}${PH_CLOSE}`;
       codeMap.set(key, `<code>${code}</code>`);
       return key;
     });
@@ -1083,28 +1252,51 @@ class MarkPaperParser {
 
 /**
  * Manages DOM elements, event listeners, and interactive UI components.
- * The only public method is init(); everything else is internal.
+ * Public API: initChrome() (once) and renderDocument() (per rendered document).
  */
 class MarkPaperUI {
   /** Initializes the UI controller and its settings sub-controller. */
   constructor() {
     this.dom = {};
     this.settings = new SettingsController(this);
+    this.scrollSpyTick = null; // Live scrollspy handler, refreshed per document
+    this.onUploadDocument = null; // Callback invoked with uploaded Markdown text
   }
 
-  /** Initializes all UI components. */
-  init() {
+  /**
+   * Builds the persistent UI chrome and wires global listeners. Runs once.
+   */
+  initChrome() {
     this.createDomElements();
     this.setupMenu();
-    this.setupToc();
+    this.setupUpload();
+    this.setupProgressBar();
+    this.setupScrollHistory();
     this.setupScrollSpy();
+    this.settings.init();
+  }
+
+  /**
+   * Wires up the components that depend on freshly rendered document content.
+   * Safe to call repeatedly (e.g. after an upload re-render).
+   */
+  renderDocument() {
+    this.setupToc();
     this.setupCopyButtons();
+    this.setupAnchors();
     this.triggerSyntaxHighlight();
     this.updateDocumentTitle();
-    this.setupProgressBar();
-    this.setupAnchors();
-    this.setupScrollHistory();
-    this.settings.init();
+    if (this.scrollSpyTick) this.scrollSpyTick();
+  }
+
+  /**
+   * Returns the scroll behavior honoring the user's reduced-motion preference.
+   * @private
+   * @returns {string} - 'auto' when reduced motion is requested, otherwise 'smooth'.
+   */
+  scrollBehavior() {
+    const reduce = window.matchMedia && window.matchMedia('(prefers-reduced-motion: reduce)').matches;
+    return reduce ? 'auto' : 'smooth';
   }
 
   /**
@@ -1125,10 +1317,8 @@ class MarkPaperUI {
    * @private
    */
   updateDocumentTitle() {
-    const h1 = document.querySelector('h1');
-    if (h1) {
-      document.title = `${h1.innerText} - MarkPaper`;
-    }
+    const h1 = document.querySelector('#content h1');
+    document.title = h1 ? `${h1.innerText} - MarkPaper` : 'MarkPaper';
   }
 
   /**
@@ -1136,17 +1326,17 @@ class MarkPaperUI {
    * @private
    */
   setupScrollHistory() {
-    const savedPos = localStorage.getItem(CONFIG.STORAGE_KEYS.SCROLL_POS);
     const currentFile = window.location.search || 'default';
-    if (savedPos) {
-      try {
+    try {
+      const savedPos = localStorage.getItem(CONFIG.STORAGE_KEYS.SCROLL_POS);
+      if (savedPos) {
         const data = JSON.parse(savedPos);
-        if (data.file === currentFile) {
+        if (data.file === currentFile && typeof data.y === 'number') {
           setTimeout(() => window.scrollTo(0, data.y), CONFIG.UI.SCROLL_RESTORE_DELAY_MS);
         }
-      } catch (e) {
-        console.error('MarkPaper: failed to read scroll history', e);
       }
+    } catch (e) {
+      console.error('MarkPaper: failed to read scroll history', e);
     }
     // PERF: throttle persistence to one LocalStorage write per animation frame
     let pending = false;
@@ -1154,8 +1344,11 @@ class MarkPaperUI {
       if (pending) return;
       pending = true;
       requestAnimationFrame(() => {
-        const state = { file: currentFile, y: window.scrollY };
-        localStorage.setItem(CONFIG.STORAGE_KEYS.SCROLL_POS, JSON.stringify(state));
+        try {
+          localStorage.setItem(CONFIG.STORAGE_KEYS.SCROLL_POS, JSON.stringify({ file: currentFile, y: window.scrollY }));
+        } catch (e) {
+          // Ignore quota/availability errors: scroll restore is a convenience only.
+        }
         pending = false;
       });
     }, { passive: true });
@@ -1177,41 +1370,45 @@ class MarkPaperUI {
   }
 
   /**
-   * Adds clickable anchor links (#) next to headings.
+   * Adds clickable anchor links (#) next to headings in the content area.
    * @private
    */
   setupAnchors() {
-    const headings = document.querySelectorAll('h1, h2, h3, h4, h5, h6');
+    const headings = document.querySelectorAll('#content h2, #content h3, #content h4, #content h5, #content h6');
     headings.forEach(h => {
-      if (!h.id) return;
+      if (!h.id || h.querySelector('.heading-anchor')) return;
       const anchor = document.createElement('a');
       anchor.className = 'heading-anchor';
       anchor.href = `#${h.id}`;
-      anchor.innerHTML = '#';
-      anchor.title = 'Copy link to this section';
-      anchor.setAttribute('aria-hidden', 'true');
+      anchor.textContent = '#';
+      anchor.setAttribute('aria-label', CONFIG.STRINGS.COPY_LINK);
+      anchor.title = CONFIG.STRINGS.COPY_LINK;
       anchor.addEventListener('click', (e) => {
         e.preventDefault();
         const url = `${window.location.origin}${window.location.pathname}${window.location.search}#${h.id}`;
-        navigator.clipboard.writeText(url).then(() => {
-          anchor.style.color = 'var(--accent-hover-color)';
-          setTimeout(() => { anchor.style.color = ''; }, CONFIG.UI.ANCHOR_FEEDBACK_MS);
-        });
+        if (navigator.clipboard) {
+          navigator.clipboard.writeText(url).then(() => {
+            anchor.style.color = 'var(--accent-hover-color)';
+            setTimeout(() => { anchor.style.color = ''; }, CONFIG.UI.ANCHOR_FEEDBACK_MS);
+          }).catch(() => { /* Clipboard denied: navigation below still works. */ });
+        }
         history.pushState(null, null, `#${h.id}`);
-        h.scrollIntoView({ behavior: 'smooth' });
+        h.scrollIntoView({ behavior: this.scrollBehavior() });
       });
       h.appendChild(anchor);
     });
   }
 
   /**
-   * Creates basic DOM elements (buttons, menu, overlay).
+   * Creates basic DOM elements (buttons, menu, overlay, progress bar).
    * @private
    */
   createDomElements() {
     // Hamburger menu button
     const btn = document.createElement('button');
     btn.className = 'hamburger-btn';
+    btn.setAttribute('aria-label', CONFIG.STRINGS.TOGGLE_MENU);
+    btn.setAttribute('aria-expanded', 'false');
     btn.innerHTML = `<span></span><span></span><span></span>`;
     document.body.prepend(btn);
     this.dom.hamburger = btn;
@@ -1219,8 +1416,9 @@ class MarkPaperUI {
     // Settings button
     const settingsBtn = document.createElement('button');
     settingsBtn.className = 'settings-btn';
-    settingsBtn.innerHTML = `<svg xmlns="http://www.w3.org/2000/svg" width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="3"></circle><path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 0 1 0 2.83 2 2 0 0 1-2.83 0l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 0 1-2 2 2 2 0 0 1-2-2v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 0 1-2.83 0 2 2 0 0 1 0-2.83l.06-.06a1.65 1.65 0 0 0 .33-1.82 1.65 1.65 0 0 0-1.51-1H3a2 2 0 0 1-2-2 2 2 0 0 1 2-2h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 0 1 0-2.83 2 2 0 0 1 2.83 0l.06.06a1.65 1.65 0 0 0 1.82.33H9a1.65 1.65 0 0 0 1-1.51V3a2 2 0 0 1 2-2 2 2 0 0 1 2 2v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 0 1 2.83 0 2 2 0 0 1 0 2.83l-.06.06a1.65 1.65 0 0 0-.33 1.82V9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 0 1 2 2 2 2 0 0 1-2 2h-.09a1.65 1.65 0 0 0-1.51 1z"></path></svg>`;
-    settingsBtn.title = 'Settings';
+    settingsBtn.setAttribute('aria-label', CONFIG.STRINGS.SETTINGS);
+    settingsBtn.innerHTML = `<svg xmlns="http://www.w3.org/2000/svg" width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><circle cx="12" cy="12" r="3"></circle><path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 0 1 0 2.83 2 2 0 0 1-2.83 0l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 0 1-2 2 2 2 0 0 1-2-2v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 0 1-2.83 0 2 2 0 0 1 0-2.83l.06-.06a1.65 1.65 0 0 0 .33-1.82 1.65 1.65 0 0 0-1.51-1H3a2 2 0 0 1-2-2 2 2 0 0 1 2-2h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 0 1 0-2.83 2 2 0 0 1 2.83 0l.06.06a1.65 1.65 0 0 0 1.82.33H9a1.65 1.65 0 0 0 1-1.51V3a2 2 0 0 1 2-2 2 2 0 0 1 2 2v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 0 1 2.83 0 2 2 0 0 1 0 2.83l-.06.06a1.65 1.65 0 0 0-.33 1.82V9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 0 1 2 2 2 2 0 0 1-2 2h-.09a1.65 1.65 0 0 0-1.51 1z"></path></svg>`;
+    settingsBtn.title = CONFIG.STRINGS.SETTINGS;
     settingsBtn.addEventListener('click', () => this.settings.toggle());
     document.body.prepend(settingsBtn);
     this.dom.settingsBtn = settingsBtn;
@@ -1228,8 +1426,9 @@ class MarkPaperUI {
     // Side menu container
     const nav = document.createElement('nav');
     nav.className = 'side-menu';
+    nav.setAttribute('aria-label', CONFIG.STRINGS.MENU);
     nav.innerHTML = `
-      <div class="side-menu-header"><h3>Menu</h3></div>
+      <div class="side-menu-header"><h3>${CONFIG.STRINGS.MENU}</h3></div>
       <ul id="table-of-contents" class="table-of-contents"></ul>
     `;
     document.body.insertBefore(nav, btn.nextSibling);
@@ -1255,16 +1454,17 @@ class MarkPaperUI {
    */
   setupMenu() {
     const toggle = () => {
-      this.dom.menu.classList.toggle('open');
+      const open = this.dom.menu.classList.toggle('open');
       this.dom.overlay.classList.toggle('show');
       this.dom.hamburger.classList.toggle('active');
+      this.dom.hamburger.setAttribute('aria-expanded', String(open));
     };
     this.dom.hamburger.addEventListener('click', (e) => { e.preventDefault(); toggle(); });
     this.dom.overlay.addEventListener('click', () => {
       if (this.settings.visible) {
         this.settings.close();
       } else {
-        toggle();
+        this.closeMenu();
       }
     });
     document.addEventListener('keydown', (e) => { if (e.key === 'Escape') { this.closeMenu(); this.settings.close(); } });
@@ -1278,6 +1478,102 @@ class MarkPaperUI {
     this.dom.menu.classList.remove('open');
     this.dom.overlay.classList.remove('show');
     this.dom.hamburger.classList.remove('active');
+    this.dom.hamburger.setAttribute('aria-expanded', 'false');
+  }
+
+  /**
+   * Builds the upload button, hidden file input, and window drag-and-drop zone.
+   * @private
+   */
+  setupUpload() {
+    // Upload button
+    const uploadBtn = document.createElement('button');
+    uploadBtn.className = 'upload-btn';
+    uploadBtn.title = CONFIG.STRINGS.UPLOAD_TITLE;
+    uploadBtn.setAttribute('aria-label', CONFIG.STRINGS.UPLOAD_TITLE);
+    uploadBtn.innerHTML = `<svg xmlns="http://www.w3.org/2000/svg" width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"></path><polyline points="17 8 12 3 7 8"></polyline><line x1="12" y1="3" x2="12" y2="15"></line></svg>`;
+    document.body.prepend(uploadBtn);
+    this.dom.uploadBtn = uploadBtn;
+
+    // Hidden file input
+    const input = document.createElement('input');
+    input.type = 'file';
+    input.accept = CONFIG.UPLOAD.ACCEPT;
+    input.className = 'upload-input';
+    input.setAttribute('aria-hidden', 'true');
+    input.tabIndex = -1;
+    document.body.appendChild(input);
+    this.dom.uploadInput = input;
+
+    uploadBtn.addEventListener('click', () => input.click());
+    input.addEventListener('change', () => {
+      if (input.files && input.files[0]) this.handleUploadedFile(input.files[0]);
+      input.value = ''; // Allow re-selecting the same file
+    });
+
+    // Full-window drop zone overlay
+    const dropZone = document.createElement('div');
+    dropZone.className = 'drop-zone';
+    dropZone.innerHTML = `<div class="drop-zone-inner">
+      <svg xmlns="http://www.w3.org/2000/svg" width="48" height="48" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"></path><polyline points="17 8 12 3 7 8"></polyline><line x1="12" y1="3" x2="12" y2="15"></line></svg>
+      <p>${CONFIG.STRINGS.DROP_HINT}</p>
+    </div>`;
+    document.body.appendChild(dropZone);
+    this.dom.dropZone = dropZone;
+
+    // Track nested dragenter/dragleave with a depth counter to avoid flicker
+    let dragDepth = 0;
+    const hasFiles = (e) => e.dataTransfer && Array.from(e.dataTransfer.types || []).includes('Files');
+
+    window.addEventListener('dragenter', (e) => {
+      if (!hasFiles(e)) return;
+      e.preventDefault();
+      dragDepth++;
+      document.body.classList.add('drag-active');
+    });
+    window.addEventListener('dragover', (e) => {
+      if (!hasFiles(e)) return;
+      e.preventDefault();
+      e.dataTransfer.dropEffect = 'copy';
+    });
+    window.addEventListener('dragleave', (e) => {
+      if (!hasFiles(e)) return;
+      dragDepth = Math.max(0, dragDepth - 1);
+      if (dragDepth === 0) document.body.classList.remove('drag-active');
+    });
+    window.addEventListener('drop', (e) => {
+      e.preventDefault();
+      dragDepth = 0;
+      document.body.classList.remove('drag-active');
+      const file = e.dataTransfer && e.dataTransfer.files && e.dataTransfer.files[0];
+      if (file) this.handleUploadedFile(file);
+    });
+  }
+
+  /**
+   * Validates and reads a user-provided file, then forwards its text to be rendered.
+   * @private
+   * @param {File} file - The dropped or selected file.
+   */
+  handleUploadedFile(file) {
+    if (typeof this.onUploadDocument !== 'function') return;
+    const name = file.name || 'document';
+    if (file.size > CONFIG.UPLOAD.MAX_BYTES) {
+      const mb = Math.round(CONFIG.UPLOAD.MAX_BYTES / (1024 * 1024));
+      this.onUploadDocument(`> [!CAUTION]\n> The file "${name}" is too large (limit ${mb} MB).`);
+      return;
+    }
+    if (!CONFIG.UPLOAD.EXT_RE.test(name)) {
+      this.onUploadDocument(`> [!CAUTION]\n> Unsupported file type. Please choose a Markdown file (.md, .markdown, .txt).`);
+      return;
+    }
+    const reader = new FileReader();
+    reader.onload = () => this.onUploadDocument(String(reader.result));
+    reader.onerror = () => {
+      console.error('MarkPaper: failed to read uploaded file', reader.error);
+      this.onUploadDocument(`> [!CAUTION]\n> Failed to read the file "${name}".`);
+    };
+    reader.readAsText(file);
   }
 
   /**
@@ -1286,7 +1582,6 @@ class MarkPaperUI {
    * @private
    */
   setupToc() {
-    // Select both H2 and H3
     const headings = document.querySelectorAll('#content h2, #content h3');
     this.dom.toc.innerHTML = '';
 
@@ -1307,7 +1602,7 @@ class MarkPaperUI {
       a.addEventListener('click', (e) => {
         e.preventDefault();
         this.closeMenu();
-        h.scrollIntoView({ behavior: 'smooth' });
+        h.scrollIntoView({ behavior: this.scrollBehavior() });
         history.pushState(null, null, `#${h.id}`);
       });
 
@@ -1317,27 +1612,24 @@ class MarkPaperUI {
   }
 
   /**
-   * Highlights the current section in the TOC while scrolling.
+   * Sets up the scroll listener that highlights the current section in the TOC.
+   * The handler queries the DOM live so it keeps working after re-renders.
    * @private
    */
   setupScrollSpy() {
-    const headings = document.querySelectorAll('#content h2, #content h3');
-    const links = this.dom.toc.querySelectorAll('a');
-
-    if (headings.length === 0) return;
-
-    const onScroll = () => {
+    this.scrollSpyTick = () => {
+      const headings = document.querySelectorAll('#content h2, #content h3');
+      if (headings.length === 0) return;
+      const links = this.dom.toc.querySelectorAll('a');
       let currentId = '';
-      const offset = CONFIG.UI.SCROLLSPY_OFFSET_PX;
       headings.forEach(h => {
-        if (window.scrollY + offset >= h.offsetTop) currentId = h.id;
+        if (window.scrollY + CONFIG.UI.SCROLLSPY_OFFSET_PX >= h.offsetTop) currentId = h.id;
       });
       links.forEach(l => {
         l.classList.toggle('active', l.getAttribute('href') === `#${currentId}`);
       });
     };
-    window.addEventListener('scroll', onScroll, { passive: true });
-    onScroll(); // Initial check
+    window.addEventListener('scroll', this.scrollSpyTick, { passive: true });
   }
 
   /**
@@ -1348,16 +1640,16 @@ class MarkPaperUI {
     document.querySelectorAll('.code-block-container').forEach(container => {
       const btn = container.querySelector('.copy-btn');
       const code = container.querySelector('code');
-      if (!btn || !code) return;
+      if (!btn || !code || !navigator.clipboard) return;
       btn.addEventListener('click', () => {
         navigator.clipboard.writeText(code.innerText).then(() => {
-          btn.textContent = 'Copied!';
+          btn.textContent = CONFIG.STRINGS.COPIED;
           btn.classList.add('copied');
           setTimeout(() => {
-            btn.textContent = 'Copy';
+            btn.textContent = CONFIG.STRINGS.COPY;
             btn.classList.remove('copied');
           }, CONFIG.UI.COPY_FEEDBACK_MS);
-        });
+        }).catch((e) => console.error('MarkPaper: clipboard write failed', e));
       });
     });
   }
@@ -1388,18 +1680,23 @@ class SettingsController {
   }
 
   /**
-   * Loads preferences from LocalStorage, falling back to defaults on corrupted data.
+   * Loads preferences from LocalStorage, honoring the OS color scheme on first
+   * visit and falling back to defaults on corrupted data.
    * @private
    * @returns {ThemePrefs} - The merged preferences object.
    */
   loadPrefs() {
     try {
       const saved = localStorage.getItem(CONFIG.STORAGE_KEYS.SETTINGS);
-      return saved ? { ...CONFIG.DEFAULTS, ...JSON.parse(saved) } : { ...CONFIG.DEFAULTS };
+      if (saved) return { ...CONFIG.DEFAULTS, ...JSON.parse(saved) };
     } catch (e) {
       console.error('MarkPaper: failed to read saved settings', e);
-      return { ...CONFIG.DEFAULTS };
     }
+    // No saved preference: start from the operating system's color scheme.
+    if (window.matchMedia && window.matchMedia('(prefers-color-scheme: dark)').matches) {
+      return { ...CONFIG.DEFAULTS, ...CONFIG.DARK_PRESET };
+    }
+    return { ...CONFIG.DEFAULTS };
   }
 
   /**
@@ -1407,7 +1704,11 @@ class SettingsController {
    * @private
    */
   savePrefs() {
-    localStorage.setItem(CONFIG.STORAGE_KEYS.SETTINGS, JSON.stringify(this.prefs));
+    try {
+      localStorage.setItem(CONFIG.STORAGE_KEYS.SETTINGS, JSON.stringify(this.prefs));
+    } catch (e) {
+      console.error('MarkPaper: failed to save settings', e);
+    }
     this.applyPrefs();
   }
 
@@ -1453,10 +1754,12 @@ class SettingsController {
   renderModal() {
     const modal = document.createElement('div');
     modal.className = 'settings-modal';
+    modal.setAttribute('role', 'dialog');
+    modal.setAttribute('aria-label', CONFIG.STRINGS.SETTINGS);
     modal.innerHTML = `
       <div class="settings-header">
-        <h3>Settings</h3>
-        <button class="close-settings">&times;</button>
+        <h3>${CONFIG.STRINGS.SETTINGS}</h3>
+        <button class="close-settings" aria-label="Close settings">&times;</button>
       </div>
       <div class="settings-body">
 
@@ -1474,7 +1777,7 @@ class SettingsController {
         </div>
 
         <div class="setting-group">
-          <label>Font Family</label>
+          <label for="input-font-family">Font Family</label>
           <select id="input-font-family">
             <option value="serif">Serif (Classic)</option>
             <option value="sans">Sans-Serif (Modern)</option>
@@ -1483,17 +1786,17 @@ class SettingsController {
         </div>
 
         <div class="setting-group">
-          <label>Background Color</label>
+          <label for="input-bg-color">Background Color</label>
           <input type="color" id="input-bg-color" value="${this.prefs['--background-color']}">
         </div>
 
         <div class="setting-group">
-          <label>Text Color</label>
+          <label for="input-text-color">Text Color</label>
           <input type="color" id="input-text-color" value="${this.prefs['--text-color']}">
         </div>
 
         <div class="setting-group">
-          <label>Link/Accent Color</label>
+          <label for="input-accent-color">Link/Accent Color</label>
           <input type="color" id="input-accent-color" value="${this.prefs['--accent-color']}">
         </div>
 
@@ -1610,30 +1913,40 @@ class SettingsController {
 // ============================================================================
 
 (function () {
+  // The Node test harness requires this file for its classes only; skip the
+  // browser bootstrap when there is no DOM.
+  if (typeof document === 'undefined') return;
+
   const parser = new MarkPaperParser();
   const ui = new MarkPaperUI();
 
+  const LOADING_HTML = `<div class="loading-state"><div class="spinner"></div><p>${CONFIG.STRINGS.LOADING}</p></div>`;
+
   /**
-   * Fetches and renders the markdown file.
+   * Parses Markdown text and renders it into the content area, then wires the
+   * document-dependent UI. Shared by file loading, uploads, and error display.
+   * @param {string} markdown - The raw Markdown text.
+   */
+  const renderInto = (markdown) => {
+    document.getElementById('content').innerHTML = parser.parse(markdown);
+    ui.renderDocument();
+  };
+
+  /**
+   * Fetches and renders a markdown file.
    * @param {string} path - The relative path to the markdown file.
    */
   const loadFile = (path) => {
-    const target = document.getElementById('content');
-    target.innerHTML = '<div class="loading-state"><div class="spinner"></div><p>Loading document...</p></div>';
-
+    document.getElementById('content').innerHTML = LOADING_HTML;
     fetch(path)
       .then(res => {
         if (!res.ok) throw new Error(`${res.status} ${res.statusText}`);
         return res.text();
       })
-      .then(markdown => {
-        target.innerHTML = parser.parse(markdown);
-        ui.init();
-      })
+      .then(markdown => renderInto(markdown))
       .catch(err => {
         console.error('MarkPaper: failed to load file', err);
-        const msg = `> [!CAUTION]\n> Failed to load file: "${path}".\n>\n> **Error:** ${err.message}`;
-        target.innerHTML = parser.parse(msg);
+        renderInto(`> [!CAUTION]\n> Failed to load file: "${path}".\n>\n> **Error:** ${err.message}`);
       });
   };
 
@@ -1642,20 +1955,26 @@ class SettingsController {
    * Checks for URL parameters to load a specific file.
    */
   document.addEventListener('DOMContentLoaded', () => {
-    const params = new URLSearchParams(window.location.search);
-    const file = params.get('file') || 'README.md';
+    ui.initChrome();
+    ui.onUploadDocument = (markdown) => {
+      renderInto(markdown);
+      window.scrollTo(0, 0);
+    };
 
-    // Auto-detect if file is in content folder or root
-    if (!file.includes('/')) {
-      const tryPath = `content/${file}`;
-      fetch(tryPath)
-        .then(res => {
-          if (res.ok) loadFile(tryPath);
-          else loadFile(file); // Fallback to root
-        })
-        .catch(() => loadFile(file));
-    } else {
-      loadFile(file);
+    const params = new URLSearchParams(window.location.search);
+    const requested = params.get('file');
+
+    // SECURITY: reject anything that is not a safe relative Markdown path
+    if (requested !== null && !isSafeMarkdownPath(requested)) {
+      renderInto(`> [!CAUTION]\n> Invalid file parameter: "${requested}".\n>\n> Only relative Markdown paths (\`.md\`, \`.markdown\`, \`.txt\`) are allowed.`);
+      return;
     }
+
+    loadFile(requested || 'README.md');
   });
 })();
+
+// Exported for the Node test harness; ignored in the browser.
+if (typeof module !== 'undefined' && module.exports) {
+  module.exports = { MarkPaperParser, MarkPaperUI, SettingsController, CONFIG, isSafeMarkdownPath };
+}

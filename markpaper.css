@@ -100,7 +100,7 @@ html {
 }
 
 body {
-    font-size: clamp(1rem, 2.5vw, 1rem);
+    font-size: 1rem;
     line-height: 1.75;
     max-width: 40em;
     margin: auto;
@@ -189,7 +189,7 @@ p {
     text-align: justify;
     text-justify: inter-ideograph;
     line-height: 1.75;
-    font-size: clamp(1rem, 2.5vw, 1rem);
+    font-size: 1rem;
     font-family: var(--current-font-family);
     letter-spacing: 0.025em;
     word-spacing: 0.1em;
@@ -197,7 +197,8 @@ p {
     text-indent: 0;
 }
 
-p:first-of-type:first-letter {
+/* Drop cap on the first body paragraph only (never inside alerts, quotes, or the footer) */
+#content > p:first-of-type::first-letter {
     font-size: 1.2em;
     font-weight: 600;
     line-height: 1;
@@ -316,7 +317,7 @@ ol {
     padding-right: 0;
     margin-top: 0;
     margin-bottom: var(--baseline-unit);
-    font-size: clamp(1rem, 2.5vw, 1rem);
+    font-size: 1rem;
     line-height: 1.75;
     font-family: var(--current-font-family);
     letter-spacing: 0.025em;
@@ -859,7 +860,8 @@ h6:hover .heading-anchor {
 }
 
 .hamburger-btn,
-.settings-btn {
+.settings-btn,
+.upload-btn {
     position: fixed;
     top: 20px;
     z-index: var(--z-controls);
@@ -887,10 +889,62 @@ h6:hover .heading-anchor {
     right: 80px;
 }
 
+.upload-btn {
+    right: 140px;
+}
+
 .hamburger-btn:hover,
-.settings-btn:hover {
+.settings-btn:hover,
+.upload-btn:hover {
     background: var(--border-color);
     border-color: var(--menu-border-hover);
+}
+
+/* Hidden native file input driven by the upload button */
+.upload-input {
+    display: none;
+}
+
+/* Full-window drop zone, revealed while a file is dragged over the page */
+.drop-zone {
+    position: fixed;
+    inset: 0;
+    z-index: var(--z-modal);
+    display: none;
+    align-items: center;
+    justify-content: center;
+    padding: 2rem;
+    background: var(--overlay-dark);
+    backdrop-filter: blur(2px);
+}
+
+body.drag-active .drop-zone {
+    display: flex;
+}
+
+.drop-zone-inner {
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    gap: 1rem;
+    padding: clamp(2rem, 6vw, 4rem);
+    border: 3px dashed var(--accent-color);
+    border-radius: 12px;
+    background: var(--background-color);
+    color: var(--text-color);
+    text-align: center;
+    pointer-events: none;
+}
+
+.drop-zone-inner svg {
+    color: var(--accent-color);
+}
+
+.drop-zone-inner p {
+    margin: 0;
+    font-size: 1.1rem;
+    font-weight: 500;
+    font-family: var(--font-sans-serif);
 }
 
 .hamburger-btn.active {
@@ -1222,6 +1276,13 @@ h6:hover .heading-anchor {
         height: 45px;
     }
 
+    .upload-btn {
+        top: 15px;
+        right: 125px;
+        width: 45px;
+        height: 45px;
+    }
+
     .settings-modal {
         right: 50%;
         transform: translateX(50%) translateY(10px);
@@ -1300,5 +1361,93 @@ h6:hover .heading-anchor {
 @media (min-width: 1200px) {
     body {
         max-width: 1100px;
+    }
+}
+
+/* ------------------------------------------------------------------
+   8. ACCESSIBILITY (Reduced Motion)
+   ------------------------------------------------------------------ */
+
+@media (prefers-reduced-motion: reduce) {
+
+    html {
+        scroll-behavior: auto;
+    }
+
+    *,
+    *::before,
+    *::after {
+        animation-duration: 0.001ms !important;
+        animation-iteration-count: 1 !important;
+        transition-duration: 0.001ms !important;
+    }
+}
+
+/* ------------------------------------------------------------------
+   9. PRINT
+   ------------------------------------------------------------------ */
+
+@media print {
+
+    /* Hide all interactive chrome */
+    .hamburger-btn,
+    .settings-btn,
+    .upload-btn,
+    .upload-input,
+    .side-menu,
+    .overlay,
+    .settings-modal,
+    .reading-progress,
+    .drop-zone,
+    .heading-anchor,
+    .copy-btn {
+        display: none !important;
+    }
+
+    html,
+    body {
+        max-width: none;
+        margin: 0;
+        padding: 0;
+        background: #ffffff;
+        color: #000000;
+    }
+
+    /* Avoid awkward page breaks inside grouped content */
+    figure,
+    table,
+    pre,
+    blockquote,
+    .alert,
+    .video-container {
+        page-break-inside: avoid;
+        break-inside: avoid;
+    }
+
+    h1,
+    h2,
+    h3,
+    h4,
+    h5,
+    h6 {
+        page-break-after: avoid;
+        break-after: avoid;
+    }
+
+    /* Expand external link targets for the printed page */
+    a[href^="http"]::after {
+        content: " (" attr(href) ")";
+        font-size: 0.85em;
+        word-break: break-all;
+    }
+
+    /* Embeds cannot print; show their source instead */
+    .video-container {
+        padding-bottom: 0 !important;
+        height: auto !important;
+    }
+
+    .video-container iframe {
+        display: none;
     }
 }
