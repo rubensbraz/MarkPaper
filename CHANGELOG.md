@@ -3,6 +3,35 @@
 All notable changes to MarkPaper are documented in this file.
 The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/) and the project adheres to [Semantic Versioning](https://semver.org/).
 
+## [1.5.0] - 2026-06-11
+
+### Added
+
+- **Underscore emphasis** — `_italic_`, `__bold__`, `___both___`, with word-boundary matching so `snake_case` stays literal.
+- **Backslash escapes** for Markdown punctuation (`\*`, `\_`, `` \` ``, `\[`, `\$`, …).
+- **Reference-style links** — `[text][ref]` / collapsed `[text][]` resolved from `[ref]: url "title"` definitions.
+- **Link/image titles** — `[text](url "title")` now sets a `title` attribute instead of corrupting the URL.
+- **Hard line breaks** — two trailing spaces produce a `<br>`.
+- **Accessibility** — a skip-to-content link; focus is moved into the menu/settings panel on open and restored on close; a basic Tab focus trap; the closed menu and modal are `inert` (no longer keyboard-reachable); `aria-modal` on the dialog.
+- `package.json` with `npm test` and `npm run check` (no runtime dependencies).
+
+### Fixed
+
+- **Soft-wrapped paragraphs** — consecutive text lines now join into a single `<p>` (were separate paragraphs), matching standard Markdown.
+- **`***bold italic***`** now nests correctly as `<strong><em>…</em></strong>` (was mis-ordered, invalid HTML).
+- **Currency** — `$5 and then $10` is no longer parsed as math.
+- **Indented code** — contiguous indented lines render as one block (was one block per line).
+- **Footnotes** — a footnote referenced in multiple sections now gets unique anchor ids (was a duplicate `id`).
+- **Tables** — empty interior cells are preserved, keeping columns aligned with the header.
+- **Nested lists** now nest inside the parent `<li>`; list items accept wrapped continuation lines.
+
+### Changed
+
+- Parser output is assembled via an array accumulator (`push`/`join`) instead of repeated string concatenation.
+- The three separate scroll listeners (progress bar, scrollspy, position save) are consolidated into one `requestAnimationFrame`-throttled handler.
+- CSP tightened: `img-src`/`media-src` limited to `https:`/`http:` (dropped `data:`, which the sanitizer already blocks).
+- CI now runs `npm run check` and `npm test`.
+
 ## [1.4.0] - 2026-06-11
 
 ### Added

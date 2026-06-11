@@ -14,7 +14,8 @@ MarkPaper is a lightweight, fully client-side Markdown renderer that turns `.md`
 | `markpaper.css` | All styling, fully driven by CSS variables. |
 | `README.md` | User guide **and** live demo document (the default file rendered by the app). |
 | `tests/parser.test.js` | Parser/security smoke tests, runnable with plain Node. |
-| `.github/workflows/ci.yml` | CI: syntax check + test suite on push/PR. |
+| `.github/workflows/ci.yml` | CI: `npm run check` + `npm test` on push/PR. |
+| `package.json` | Metadata + `test`/`check` scripts (no runtime dependencies). |
 | `CHANGELOG.md` | Release history (Keep a Changelog format). |
 | `assets/` | Favicons and web manifest only. |
 
@@ -38,9 +39,10 @@ A document reaches the renderer three ways: the `?file=` URL parameter (default 
    - Upload constraints → `CONFIG.UPLOAD`; allowlists → `CONFIG.ALLOWED_*` / `CONFIG.EMBED_HOST_ALLOWLIST` / `CONFIG.METADATA_KEYS`;
    - External theme URLs → `CONFIG.PRISM_THEMES`;
    - Theme variable sets → `CONFIG.DEFAULTS` / `CONFIG.DARK_PRESET` (both must stay in sync with `:root` in `markpaper.css`).
-5. **The parser is a line-based state machine.** `parse()` dispatches each line through the numbered handler chain (`processCodeBlock` → … → paragraph fallback). Every `processX(line, ...)` handler returns a `boolean`: `true` means the line was consumed. Buffered blocks (code, math, table, blockquote, alert, lists) are flushed by their matching `flushX`/`closeX` method. Any new state field **must** be initialized in `reset()` — `parse()` calls `reset()` and must stay idempotent.
-6. **Parser output is a string.** `MarkPaperParser` never touches the DOM. All DOM access belongs to `MarkPaperUI`/`SettingsController`/the entry IIFE.
-7. **UI lifecycle is split in two.** `MarkPaperUI.initChrome()` builds the persistent chrome and global listeners **once**; `renderDocument()` wires everything that depends on freshly rendered content and is **safe to call repeatedly** (uploads, error pages). Per-document setup must not add `window`/`document` listeners (they would accumulate) — register those in `initChrome()` and have them query the live DOM. Rendering text is delegated from the UI back to the entry via the `onUploadDocument` callback so the parser stays out of the UI layer.
+5. **The parser is a line-based state machine.** `parse()` dispatches each line through the numbered handler chain (`processCodeBlock` → … → list-continuation → buffered paragraph). Every `processX(line, ...)` handler returns a `boolean`: `true` means the line was consumed. Buffered blocks (code, math, **indented code**, table, blockquote, alert, lists, **paragraph**) are flushed by their matching `flushX`/`closeX` method; a handler that starts a new block must first close the soft blocks (`closeParagraph()`, `flushIndentCode()`). Soft-wrapped lines accumulate in `paragraphBuffer` and join into one `<p>` (space, or `<br>` for a hard break = two trailing spaces). Lists track an open `<li>` **per stack level** (`itemOpen`) so nesting stays inside the parent item and continuation lines can extend it. Footnote anchor ids carry a `footnoteEpoch` suffix so a footnote reused across sections stays unique. Any new state field **must** be initialized in `reset()` — `parse()` calls `reset()` and must stay idempotent.
+6. **Parser output is assembled into `this.html` (an array), returned via `join('')`.** Append with `this.html.push(...)`, never `+=`. `MarkPaperParser` never touches the DOM. All DOM access belongs to `MarkPaperUI`/`SettingsController`/the entry IIFE.
+7. **`escapeInline` runs a fixed protect→transform→restore pipeline:** protect backslash-escapes → protect inline math (`CONFIG.PATTERNS.INLINE_MATH`, currency-safe) → `sanitizeHTML` → protect valid tags → escape `& < >` → restore tags+math → protect inline code → emphasis (`***`/`___`/`**`/`__`/`*`/`_`/`~~`, underscore variants are word-boundary gated) → images → footnote refs → reference links → inline links → autolink → restore code → restore escapes. New inline syntax slots into this order; never interpolate user text after the escaping pass without re-escaping (see Security rule 7). Reference-link and footnote definitions are harvested in `preprocess()`. Lookbehind regexes are allowed (evergreen-browser target).
+8. **UI lifecycle is split in two.** `MarkPaperUI.initChrome()` builds the persistent chrome and global listeners **once**; `renderDocument()` wires everything that depends on freshly rendered content and is **safe to call repeatedly** (uploads, error pages). Per-document setup must not add `window`/`document` listeners (they would accumulate) — register those in `initChrome()` and have them query the live DOM. A single `requestAnimationFrame`-throttled scroll listener (`setupScroll`) drives the progress bar, scrollspy, and position save together. Rendering text is delegated from the UI back to the entry via the `onUploadDocument` callback so the parser stays out of the UI layer.
 
 ## Security Rules (mandatory — XSS prevention)
 
@@ -160,7 +162,7 @@ There is no TypeScript: **all type information lives in JSDoc braces**.
 
 - **2-space indentation** in JS and HTML; **4-space** in CSS (enforced by `.editorconfig`).
 - **Single quotes** for all JS strings. Double quotes appear only inside generated HTML attribute values.
-- **Template literals for any string composition** — string concatenation with `+` is forbidden (`` `${scrolled}%` ``, never `scrolled + '%'`).
+- **Template literals for any string composition** — string concatenation with `+` is forbidden (`` `${scrolled}%` ``, never `scrolled + '%'`). Parser markup is pushed onto the `this.html` array, never built with `+=`.
 - **`addEventListener` only.** Never assign `el.onclick`/`el.oninput`/`el.onchange` — it silently overwrites other handlers. Scroll/resize listeners on `window`/`document` must pass `{ passive: true }` and throttle non-trivial work (e.g. via a `requestAnimationFrame` flag).
 - **`parseInt` always takes the radix**: `parseInt(value, 10)`.
 - `localStorage` reads and `JSON.parse` must be wrapped in `try/catch` with a sane fallback — never let corrupted storage break initialization.
@@ -205,7 +207,9 @@ There is no TypeScript: **all type information lives in JSDoc braces**.
 ## Accessibility (mandatory)
 
 - Icon-only controls (hamburger, settings, upload) carry an `aria-label`; their inline `<svg>` is `aria-hidden="true"`.
-- The hamburger toggles `aria-expanded`; the settings modal has `role="dialog"` + `aria-label`; form controls in the modal use `<label for=...>`.
+- The hamburger toggles `aria-expanded`; the settings modal has `role="dialog"` + `aria-modal` + `aria-label`; form controls in the modal use `<label for=...>`.
+- **Off-screen panels must be `inert` when closed** (side menu, settings modal) so they are not keyboard-reachable. Opening a panel moves focus into it and stores the trigger; closing restores focus to the trigger; `Tab` is trapped within the open panel (`getFocusable`/`trapTab`).
+- A **skip-to-content** link is the first focusable element; `#content` is `tabindex="-1"` so it can receive focus.
 - Honor user preferences: `prefers-reduced-motion` (no smooth scroll/transitions/animations — both in CSS and via `MarkPaperUI.scrollBehavior()`), and `prefers-color-scheme` (first-visit default theme in `SettingsController.loadPrefs`).
 - Decorative anchors that are also interactive (the heading `#` link) get a real `aria-label`, not `aria-hidden`.
 
@@ -226,8 +230,8 @@ There is no TypeScript: **all type information lives in JSDoc braces**.
 
 CI (`.github/workflows/ci.yml`) runs steps 1–2 on every push/PR; run them locally first.
 
-1. `node --check markpaper.js` — must pass.
-2. `node tests/parser.test.js` — all tests must pass. Parser/security changes require new/updated tests, especially for the XSS vectors: `[x](javascript:alert(1))`, `[x](javascript&colon;alert(1))`, `[x](&#106;avascript:alert(1))`, `![x](javascript:alert(1))`, `<script>`, `<img onerror=...>`, `<iframe src="https://evil/">`, `<div style="position:fixed">` — none may survive into the output.
+1. `npm run check` (`node --check markpaper.js`) — must pass.
+2. `npm test` (`node tests/parser.test.js`) — all tests must pass. Parser/security changes require new/updated tests, especially for the XSS vectors: `[x](javascript:alert(1))`, `[x](javascript&colon;alert(1))`, `[x](&#106;avascript:alert(1))`, `![x](javascript:alert(1))`, `<script>`, `<img onerror=...>`, `<iframe src="https://evil/">`, `<div style="position:fixed">`, and footnote-id breakout (`[^1" onfocus=...]`) — none may survive into the output. Bump `@version` in `markpaper.js` **and** `package.json` together.
 3. Serve the folder with any static server (e.g. `python -m http.server` or VS Code Live Server) and open `index.html`:
    - `README.md` renders fully (header, TOC, alerts, tables with alignment, math, code highlighting, footnotes, embeds);
    - the hamburger menu, settings modal, theme presets (light/dark), copy buttons, reading progress bar, **upload button, and drag-and-drop** all work;
