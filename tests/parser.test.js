@@ -2,24 +2,17 @@
 
 /**
  * @file tests/parser.test.js
- * @description Smoke tests for MarkPaperParser, runnable on plain Node (no framework):
+ * @description Smoke tests for MarkPaper, runnable on plain Node (no framework):
  *   node tests/parser.test.js
- * The DOM entry section of markpaper.js is stripped so the parser runs headless.
+ * The browser bootstrap in markpaper.js is skipped when there is no DOM, so the
+ * module can be required directly for its parser, path validator, and CONFIG.
  */
 
 const fs = require('fs');
 const path = require('path');
 
 const ROOT = path.join(__dirname, '..');
-const src = fs.readFileSync(path.join(ROOT, 'markpaper.js'), 'utf8');
-
-// Strip everything from the application entry banner on (it requires a DOM)
-const cut = src.indexOf('// 5. APPLICATION ENTRY');
-const parserSrc = src.slice(0, cut).replace(/^'use strict';/, '') +
-  '\nmodule.exports = { MarkPaperParser, CONFIG };';
-const mod = { exports: {} };
-new Function('module', 'exports', 'console', parserSrc)(mod, mod.exports, console);
-const { MarkPaperParser } = mod.exports;
+const { MarkPaperParser, CONFIG, isSafeMarkdownPath } = require(path.join(ROOT, 'markpaper.js'));
 
 const parser = new MarkPaperParser();
 let failures = 0;
@@ -39,9 +32,11 @@ function check(name, cond, extra) {
   }
 }
 
-// --- Security (XSS vectors) ---
+let html;
 
-let html = parser.parse('[click me](javascript:alert(1))');
+// --- Security: URL protocols (links, images, raw HTML) ---
+
+html = parser.parse('[click me](javascript:alert(1))');
 check('javascript: link blocked', !html.includes('href="javascript'), html.slice(0, 200));
 
 html = parser.parse('[x](javascript&colon;alert(1))');
@@ -65,7 +60,44 @@ check('onerror attribute stripped', !/onerror/i.test(html), html.slice(0, 200));
 html = parser.parse('Inline $<script>bad()</script>$ math');
 check('KaTeX fallback escaped', !html.includes('<script>'), html.slice(0, 300));
 
-// --- Links & URLs ---
+// --- Security: iframe host allowlist (raw HTML) ---
+
+html = parser.parse('<iframe src="https://evil.example/x"></iframe>');
+check('untrusted iframe blocked', !html.includes('<iframe'), html.slice(0, 200));
+
+html = parser.parse('<iframe src="https://www.youtube.com/embed/abc"></iframe>');
+check('youtube iframe allowed', html.includes('<iframe') && html.includes('youtube.com/embed/abc'), html.slice(0, 200));
+
+html = parser.parse('<iframe src="javascript:alert(1)"></iframe>');
+check('javascript iframe blocked', !html.includes('<iframe'), html.slice(0, 200));
+
+// --- Security: inline style allowlist ---
+
+html = parser.parse('<div style="position:fixed;top:0;left:0;color:red">x</div>');
+check('position stripped from style', !/position/i.test(html), html.slice(0, 200));
+check('safe color kept in style', /color:\s*red/i.test(html), html.slice(0, 200));
+
+html = parser.parse('<div style="background:url(http://evil/track.png)">x</div>');
+check('url() in style stripped', !/url\(/i.test(html), html.slice(0, 200));
+
+// --- Security: image width validation ---
+
+html = parser.parse('![cap](https://example.com/a.png){width="50%"}');
+check('valid width applied', html.includes('width: 50%'), html.slice(0, 200));
+
+html = parser.parse('![cap](https://example.com/a.png){width="50%;position:fixed;top:0"}');
+check('malicious width rejected', !/position/i.test(html) && !html.includes('width: 50%;position'), html.slice(0, 250));
+
+// --- Security: file path validation ---
+
+check('isSafeMarkdownPath accepts relative .md', isSafeMarkdownPath('paper.md') === true);
+check('isSafeMarkdownPath accepts subfolder', isSafeMarkdownPath('content/paper.md') === true);
+check('isSafeMarkdownPath rejects absolute URL', isSafeMarkdownPath('https://evil.com/x.md') === false);
+check('isSafeMarkdownPath rejects protocol-relative', isSafeMarkdownPath('//evil.com/x.md') === false);
+check('isSafeMarkdownPath rejects traversal', isSafeMarkdownPath('../../secret.md') === false);
+check('isSafeMarkdownPath rejects non-markdown', isSafeMarkdownPath('config.json') === false);
+
+// --- Links & URLs (positive) ---
 
 html = parser.parse('[site](https://example.com)');
 check('https link rendered', html.includes('href="https://example.com"'));
@@ -113,16 +145,34 @@ check('emphasis', html.includes('<strong>b</strong>') && html.includes('<em>i</e
 html = parser.parse('keep <mark>this</mark> visible');
 check('mark tag kept', html.includes('<mark>this</mark>'));
 
-// --- Headings ---
+// --- Placeholder collision safety (literal sentinel-like text) ---
+
+html = parser.parse('Literal __MATH_0__ and __TAG_0__ tokens.');
+check('literal placeholder-like text preserved',
+  html.includes('__MATH_0__') && html.includes('__TAG_0__'), html.slice(0, 200));
+
+// --- Headings & metadata ---
 
 html = parser.parse('## Chapter\n### Section\n#### Sub A\n#### Sub B');
 const ids = [...html.matchAll(/id="([^"]+)"/g)].map(m => m[1]);
 check('heading ids unique', new Set(ids).size === ids.length, JSON.stringify(ids));
 
-// --- Blocks ---
+html = parser.parse('# Title\nauthor: Ada\n\nBody text.');
+check('known metadata consumed into header', html.includes('class="author"') && html.includes('Ada'), html.slice(0, 300));
+
+html = parser.parse('# Title\nNote: read me first\n\nBody text.');
+check('unknown metadata kept as content', html.includes('Note: read me first'), html.slice(0, 300));
+
+// --- Tables (incl. alignment) ---
 
 html = parser.parse('| A | B |\n| --- | --- |\n| 1 | 2 |');
 check('table renders', html.includes('<th>A</th>') && html.includes('<td>1</td>'));
+
+html = parser.parse('| L | C | R |\n| :--- | :---: | ---: |\n| 1 | 2 | 3 |');
+check('center alignment applied', html.includes('text-align:center'), html.slice(0, 400));
+check('right alignment applied', html.includes('text-align:right'), html.slice(0, 400));
+
+// --- Blocks ---
 
 html = parser.parse('```js\nconst x = 1;\n```');
 check('fenced code language mapped', html.includes('language-javascript') && html.includes('const x = 1;'));
@@ -134,7 +184,17 @@ html = parser.parse('## S\nClaim[^1].\n\n[^1]: Footnote text.');
 check('footnote rendered', html.includes('footnote-ref') && html.includes('Footnote text.'));
 
 html = parser.parse('![My caption](https://example.com/a.png){width="50%"}');
-check('figure with width', html.includes('width: 50%') && html.includes('Fig 1 My caption'));
+check('figure with caption', html.includes('Fig 1 My caption'));
+
+// --- Footer ---
+
+html = parser.parse('x');
+check('footer links carry rel=noopener', (html.match(/rel="noopener noreferrer"/g) || []).length >= 3, html.slice(-400));
+
+// --- Void elements ---
+
+html = parser.parse('![cap](https://example.com/a.png)');
+check('img void element has no self-closing slash', html.includes('/>') === false || !/<img[^>]*\/>/.test(html), html.slice(0, 200));
 
 // --- Full document ---
 
