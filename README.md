@@ -6,7 +6,7 @@ date: 2025-12-10
 
 institution: MarkPaper Project
 
-**MarkPaper** is a lightweight, client-side tool that transforms standard Markdown into beautiful, academic-style HTML documents. It features a robust parser built with vanilla JavaScript that supports extended syntax, including LaTeX math, syntax highlighting, dynamic diagrams, and responsive embeds.
+**MarkPaper** is a lightweight, client-side tool that transforms standard Markdown into beautiful, academic-style HTML documents. It features a robust parser built with vanilla JavaScript that supports extended syntax, including LaTeX math, syntax highlighting, and responsive embeds.
 
 This document serves as both a **User Guide** and a **Live Demo**. Every section below shows the Markdown syntax followed by the rendered result.
 
@@ -42,7 +42,7 @@ To use MarkPaper, include the CSS and JS files in your HTML document. You also n
     <link rel="manifest" href="assets/site.webmanifest">
     <!-- MarkPaper -->
     <link rel="stylesheet" href="markpaper.css">
-    <script src="markpaper.js"></script>
+    <script src="markpaper.js" defer></script>
     <!-- Prism (Code highlighting) -->
     <link id="prism-theme-link" rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/prism-themes/1.9.0/prism-ghcolors.min.css">
     <script src="https://cdnjs.cloudflare.com/ajax/libs/prism/1.29.0/components/prism-core.min.js"></script>
@@ -61,12 +61,12 @@ To use MarkPaper, include the CSS and JS files in your HTML document. You also n
         </div>
       </article>
     </main>
+    <noscript>
+      <div class="alert alert-warning">
+        <strong>Warning:</strong> JavaScript is required to run MarkPaper. Please enable it in your browser settings.
+      </div>
+    </noscript>
   </body>
-  <noscript>
-    <div class="alert alert-warning">
-      <strong>Warning:</strong> JavaScript is required to run MarkPaper. Please enable it in your browser settings.
-    </div>
-  </noscript>
 
 </html>
 ```
@@ -75,8 +75,9 @@ To use MarkPaper, include the CSS and JS files in your HTML document. You also n
 
 MarkPaper reads the `?file=` URL parameter to determine which Markdown file to render.
 
-* **Default:** `http://127.0.0.1:5500/` (loads `readme.md`)
+* **Default:** `http://127.0.0.1:5500/` (loads `README.md`)
 * **Specific File:** `http://127.0.0.1:5500/?file=my-paper.md`
+* **Content Folder:** bare file names are first searched in `content/`, then in the project root.
 
 ---
 

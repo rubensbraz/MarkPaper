@@ -7,7 +7,6 @@
     --font-serif: "Hiragino Mincho ProN", "Yu Mincho", "YuMincho", "HG Mincho E", "MS PMincho", "MS Mincho", Georgia, "Times New Roman", Times, serif;
     --font-sans-serif: "Hiragino Sans", "Yu Gothic", "YuGothic", "Helvetica Neue", Helvetica, Arial, sans-serif;
     --font-monospace: Consolas, Monaco, "Courier New", monospace;
-    --font-system: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
 
     /* Dynamic Settings (Controlled by JS) */
     --current-font-family: var(--font-serif);
@@ -30,7 +29,6 @@
     --blockquote-border: var(--accent-color);
     --secondary-text-color: color-mix(in srgb, var(--text-color), transparent 40%);
     --muted-text-color: color-mix(in srgb, var(--text-color), transparent 60%);
-    --button-text-color: #495057;
 
     /* Visual Effects */
     --shadow-light: rgba(0, 0, 0, 0.07);
@@ -39,6 +37,19 @@
     --strikethrough-color: rgba(108, 117, 125, 0.6);
     --figcaption-color: rgba(108, 117, 125, 0.8);
     --highlight-background: rgba(255, 235, 59, 0.3);
+
+    /* Danger Accents (destructive actions) */
+    --danger-color: #dc3545;
+    --danger-hover-bg: color-mix(in srgb, var(--danger-color), var(--background-color) 92%);
+    --danger-border: color-mix(in srgb, var(--danger-color), var(--background-color) 75%);
+
+    /* Z-Index Scale (stacking order across the UI) */
+    --z-copy-btn: 10;
+    --z-controls: 100;
+    --z-overlay: 150;
+    --z-menu: 200;
+    --z-modal: 250;
+    --z-progress: 9999;
 
     /* Menu Configuration */
     --menu-background: var(--background-color);
@@ -333,6 +344,15 @@ li li {
     margin-bottom: calc(var(--baseline-unit) * 0.25);
 }
 
+/* Task Lists (checkboxes act as the list marker) */
+li.task-list-item {
+    list-style-type: none;
+}
+
+ol li.task-list-item::before {
+    content: none;
+}
+
 /* Ordered List Counters */
 ol {
     list-style: none;
@@ -510,7 +530,7 @@ code[class*="language-"] {
     position: absolute;
     top: 10px;
     right: 10px;
-    z-index: 10;
+    z-index: var(--z-copy-btn);
     background-color: var(--copy-btn-bg);
     border: 1px solid var(--copy-btn-border);
     border-radius: 4px;
@@ -780,6 +800,29 @@ table code {
    6. UI CONTROLS & OVERLAY (Menu, Settings, TOC)
    ------------------------------------------------------------------ */
 
+/* Loading State (shown while the markdown file is fetched) */
+.loading-state {
+    text-align: center;
+    padding: calc(var(--baseline-unit) * 3) 0;
+    color: var(--secondary-text-color);
+}
+
+.spinner {
+    width: 36px;
+    height: 36px;
+    margin: 0 auto var(--baseline-unit);
+    border: 3px solid var(--border-color);
+    border-top-color: var(--accent-color);
+    border-radius: 50%;
+    animation: spinner-rotate 0.8s linear infinite;
+}
+
+@keyframes spinner-rotate {
+    to {
+        transform: rotate(360deg);
+    }
+}
+
 .reading-progress {
     position: fixed;
     top: 0;
@@ -787,7 +830,7 @@ table code {
     width: 0%;
     height: 4px;
     background: var(--accent-color);
-    z-index: 9999;
+    z-index: var(--z-progress);
     transition: width 0.1s;
     box-shadow: 0 1px 2px var(--shadow-light);
 }
@@ -819,7 +862,7 @@ h6:hover .heading-anchor {
 .settings-btn {
     position: fixed;
     top: 20px;
-    z-index: 100;
+    z-index: var(--z-controls);
     background: var(--menu-background);
     border: 1px solid var(--menu-border);
     border-radius: 50%;
@@ -851,7 +894,7 @@ h6:hover .heading-anchor {
 }
 
 .hamburger-btn.active {
-    z-index: 250;
+    z-index: var(--z-modal);
     background: var(--menu-background-active);
 }
 
@@ -886,7 +929,7 @@ h6:hover .heading-anchor {
     background: var(--background-color);
     border-left: 1px solid var(--border-color);
     box-shadow: -2px 0 10px var(--shadow-light);
-    z-index: 200;
+    z-index: var(--z-menu);
     transition: right 0.3s ease;
     overflow-y: auto;
     padding: 0;
@@ -952,7 +995,7 @@ h6:hover .heading-anchor {
     width: 100%;
     height: 100%;
     background: var(--overlay-dark);
-    z-index: 150;
+    z-index: var(--z-overlay);
     opacity: 0;
     visibility: hidden;
     transition: all 0.3s ease;
@@ -973,7 +1016,7 @@ h6:hover .heading-anchor {
     border: 1px solid var(--border-color);
     border-radius: 8px;
     box-shadow: 0 4px 15px var(--shadow-medium);
-    z-index: 250;
+    z-index: var(--z-modal);
     padding: 0;
     opacity: 0;
     visibility: hidden;
@@ -1087,9 +1130,9 @@ h6:hover .heading-anchor {
 }
 
 .btn-reset:hover {
-    background: #fdf2f2;
-    color: #dc3545;
-    border-color: #f5c6cb;
+    background: var(--danger-hover-bg);
+    color: var(--danger-color);
+    border-color: var(--danger-border);
 }
 
 /* Custom scrollbars */
