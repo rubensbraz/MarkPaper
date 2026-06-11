@@ -824,6 +824,25 @@ table code {
     }
 }
 
+/* Skip link: hidden until focused, then pinned to the top-left */
+.skip-link {
+    position: fixed;
+    top: -100px;
+    left: 8px;
+    z-index: var(--z-progress);
+    padding: 0.6rem 1rem;
+    background: var(--accent-color);
+    color: #ffffff;
+    border-radius: 0 0 6px 6px;
+    text-decoration: none;
+    font-family: var(--font-sans-serif);
+    transition: top 0.2s ease;
+}
+
+.skip-link:focus {
+    top: 0;
+}
+
 .reading-progress {
     position: fixed;
     top: 0;
@@ -1075,7 +1094,8 @@ body.drag-active .drop-zone {
     opacity: 0;
     visibility: hidden;
     transform: translateY(-10px);
-    transition: all 0.2s ease;
+    /* Exclude visibility so it snaps on open and focus can move in immediately */
+    transition: opacity 0.2s ease, transform 0.2s ease;
     color: var(--text-color);
 }
 

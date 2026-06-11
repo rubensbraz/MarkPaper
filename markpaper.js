@@ -5,7 +5,7 @@
  * @description A clean and academic Markdown renderer for the web.
  * Includes support for extended syntax (alerts, footnotes), KaTeX, PrismJS,
  * theme management, and local file upload (button + drag-and-drop).
- * @version 1.4.0
+ * @version 1.5.0
  */
 
 // ============================================================================
@@ -107,7 +107,11 @@ const CONFIG = {
     TABLE_ROW: /^\s*\|?(.+)\|?\s*$/, // Table row
     IMAGE: /^!\[([^\]]*)\]\(([^)]+)\)\s*(?:\{([^}]+)\})?$/, // Standalone image with optional {width=...}
     FOOTNOTE_DEF: /^\[\^([^\]]+)\]:\s*(.+)$/, // Footnote definition
+    LINK_DEF: /^\[([^\]^][^\]]*)\]:\s*(\S+)(?:\s+"([^"]*)")?$/, // Reference-link definition
     DIMENSION: /^\d+(\.\d+)?(%|px|em|rem|vw|vh)$/, // Safe CSS length for {width=...}
+    // Inline math ($...$): currency-safe — no space after the opening $, none before
+    // the closing $, and the closing $ is not followed by a digit (so "$5 and $10" is text)
+    INLINE_MATH: /\$(?!\s)((?:\\.|[^$\\])+?)(?<!\s)\$(?!\d)/g,
     // Regex for auto-embedding videos (standalone lines)
     VIDEO_YOUTUBE: /^https?:\/\/(?:www\.|m\.)?(?:youtube\.com\/watch\?v=|youtu\.be\/)([\w-]+)(?:[\?&][\w=-]+)*$/,
     VIDEO_VIMEO: /^https?:\/\/(?:www\.)?vimeo\.com\/(\d+)$/,
@@ -267,7 +271,7 @@ class MarkPaperParser {
    * @private
    */
   reset() {
-    this.html = '';
+    this.html = []; // Output accumulator (joined in parse)
     this.globalFigureNum = 0;
 
     // Section numbering state
@@ -276,18 +280,22 @@ class MarkPaperParser {
     this.minorHeadingNum = 0; // Unique anchor counter for H4-H6
     this.currentSectionLevel = 0; // 1=h1, 2=h2...
 
-    // Footnote state
+    // Footnote & reference-link state
     this.footnotesDef = {};        // Stores footnote content (id -> content)
+    this.linkDefs = {};            // Reference-link definitions (label -> {url, title})
     this.sectionFootnotes = [];    // Tracks footnotes used in the current section
+    this.footnoteEpoch = 0;        // Bumped on each section flush to keep anchor ids unique
 
     // Block context state
     this.state = {
       inCodeBlock: false, codeFence: '', codeLang: '', codeBuffer: [],
       inMathBlock: false, mathBuffer: [],
+      inIndentCode: false, indentCodeBuffer: [],
       inTable: false, tableHeader: null, tableRows: [], tableAlign: [],
       inBlockquote: false, blockquoteBuffer: [],
       inAlert: false, alertType: '', alertBuffer: [],
-      listStack: [] // Nested list levels (ListStackItem[])
+      listStack: [], // Nested list levels (ListStackItem[]), each may hold an open <li>
+      paragraphBuffer: [] // Soft-wrapped lines accumulated into one paragraph
     };
   }
 
@@ -307,7 +315,8 @@ class MarkPaperParser {
     const lines = this.preprocess(rawLines);
 
     for (let i = 0; i < lines.length; i++) {
-      const line = lines[i].trimEnd();
+      const rawLine = lines[i];
+      const line = rawLine.trimEnd();
 
       // 1. Handle Code Blocks (Highest priority)
       if (this.processCodeBlock(line)) continue;
@@ -338,7 +347,7 @@ class MarkPaperParser {
       // 6. Handle Horizontal Rules
       if (CONFIG.PATTERNS.HR.test(line.trim())) {
         this.closeAllBlocks();
-        this.html += '<hr>\n';
+        this.html.push('<hr>\n');
         continue;
       }
 
@@ -360,22 +369,31 @@ class MarkPaperParser {
       // 12. Handle Raw Block HTML
       if (this.processBlockHtml(line)) continue;
 
-      // 13. Default: Paragraph
-      // Close strictly block-level elements before starting a paragraph
-      this.closeList();
-      this.closeTable();
-      this.closeBlockquote();
-      this.closeAlert();
+      // 13. List item continuation: an indented, non-block line under an open <li>
+      const topList = this.state.listStack[this.state.listStack.length - 1];
+      if (topList && topList.itemOpen && /^\s+\S/.test(rawLine)) {
+        this.html.push(` ${this.escapeInline(line.trim())}`);
+        continue;
+      }
 
-      this.html += `<p>${this.escapeInline(line)}</p>\n`;
+      // 14. Default: buffered paragraph (soft-wrapped lines join into one <p>)
+      // Close strictly block-level elements only when starting a fresh paragraph
+      if (this.state.paragraphBuffer.length === 0) {
+        this.closeList();
+        this.closeTable();
+        this.closeBlockquote();
+        this.closeAlert();
+      }
+      // Two or more trailing spaces request a hard line break
+      this.state.paragraphBuffer.push({ text: line.trim(), hardBreak: / {2,}$/.test(rawLine) });
     }
 
     // Final cleanup (close any open blocks at EOF)
     this.closeAllBlocks();
     this.appendSectionFootnotes();
-    this.html += this.generateFooter();
+    this.html.push(this.generateFooter());
 
-    return this.html;
+    return this.html.join('');
   }
 
   /**
@@ -392,6 +410,11 @@ class MarkPaperParser {
       const fnMatch = line.match(CONFIG.PATTERNS.FOOTNOTE_DEF);
       if (fnMatch) {
         this.footnotesDef[fnMatch[1]] = fnMatch[2];
+        continue;
+      }
+      const linkMatch = line.match(CONFIG.PATTERNS.LINK_DEF);
+      if (linkMatch) {
+        this.linkDefs[linkMatch[1].toLowerCase()] = { url: linkMatch[2], title: linkMatch[3] || '' };
         continue;
       }
       cleanedLines.push(line);
@@ -443,7 +466,7 @@ class MarkPaperParser {
     const singleLineMatch = line.match(CONFIG.PATTERNS.MATH_BLOCK_SINGLE);
     if (singleLineMatch && !this.state.inMathBlock) {
       this.closeAllBlocks();
-      this.html += this.renderKaTeX(singleLineMatch[1], true);
+      this.html.push(this.renderKaTeX(singleLineMatch[1], true));
       return true;
     }
     if (CONFIG.PATTERNS.MATH_BLOCK_START.test(line)) {
@@ -468,14 +491,22 @@ class MarkPaperParser {
    * @returns {boolean} - True if line was consumed.
    */
   processIndentedCode(line) {
-    if ((line.startsWith('    ') || line.startsWith('\t')) &&
+    const isIndentedCode = (line.startsWith('    ') || line.startsWith('\t')) &&
       !CONFIG.PATTERNS.LIST_UL.test(line) &&
-      !CONFIG.PATTERNS.LIST_OL.test(line)) {
-      this.closeList();
-      const codeText = line.replace(/^(    |\t)/, '');
-      this.html += `<div class="code-block-container"><button class="copy-btn">${CONFIG.STRINGS.COPY}</button><pre><code class="language-plaintext">${this.escapeHTML(codeText)}</code></pre></div>\n`;
+      !CONFIG.PATTERNS.LIST_OL.test(line);
+    if (isIndentedCode) {
+      // Buffer consecutive indented lines so they render as one code block
+      if (!this.state.inIndentCode) {
+        this.closeParagraph();
+        this.closeList();
+        this.state.inIndentCode = true;
+        this.state.indentCodeBuffer = [];
+      }
+      this.state.indentCodeBuffer.push(line.replace(/^(    |\t)/, ''));
       return true;
     }
+    // A non-indented line ends an open indented-code block but is not consumed
+    if (this.state.inIndentCode) this.flushIndentCode();
     return false;
   }
 
@@ -508,7 +539,7 @@ class MarkPaperParser {
           k++;
         } else { break; }
       }
-      this.html += this.renderDocumentHeader(h1Match[1], metadata);
+      this.html.push(this.renderDocumentHeader(h1Match[1], metadata));
       return true;
     }
 
@@ -538,7 +569,7 @@ class MarkPaperParser {
       } else {
         id = `subsection-${++this.minorHeadingNum}`;
       }
-      this.html += `<h${level} id="${id}">${this.escapeInline(displayText)}</h${level}>\n`;
+      this.html.push(`<h${level} id="${id}">${this.escapeInline(displayText)}</h${level}>\n`);
       return true;
     }
     return false;
@@ -561,6 +592,7 @@ class MarkPaperParser {
     else { return false; }
 
     const content = match[2];
+    this.closeParagraph(); this.flushIndentCode();
     this.closeBlockquote(); this.closeAlert(); this.closeTable();
 
     const indent = match[1].length;
@@ -600,21 +632,26 @@ class MarkPaperParser {
       this.closeOneListLevel();
     }
 
-    // Open new levels until the stack reaches targetLevel
+    // Open new levels until the stack reaches targetLevel (nested lists stay
+    // inside the still-open parent <li>)
     while (this.state.listStack.length <= targetLevel) {
-      this.html += `<${type}>\n`;
-      this.state.listStack.push({ type: type, indent: indent });
+      this.html.push(`<${type}>\n`);
+      this.state.listStack.push({ type: type, indent: indent, itemOpen: false });
     }
 
-    // Handle task list items [x]
+    // Close the previous sibling item at this level before opening a new one
+    const top = this.state.listStack[this.state.listStack.length - 1];
+    if (top.itemOpen) { this.html.push('</li>\n'); top.itemOpen = false; }
+
+    // Emit the new item without its closing tag so continuations can extend it
     const taskMatch = content.match(CONFIG.PATTERNS.CHECKBOX);
     if (taskMatch) {
       const checked = taskMatch[1].toLowerCase() === 'x' ? 'checked' : '';
-      const text = taskMatch[2];
-      this.html += `<li class="task-list-item"><input type="checkbox" disabled ${checked}> ${this.escapeInline(text)}</li>\n`;
+      this.html.push(`<li class="task-list-item"><input type="checkbox" disabled ${checked}> ${this.escapeInline(taskMatch[2])}`);
     } else {
-      this.html += `<li>${this.escapeInline(content)}</li>\n`;
+      this.html.push(`<li>${this.escapeInline(content)}`);
     }
+    top.itemOpen = true;
     return true;
   }
 
@@ -628,9 +665,10 @@ class MarkPaperParser {
    */
   processTables(line, index, lines) {
     if (!line.includes('|')) return false;
-    const match = line.match(CONFIG.PATTERNS.TABLE_ROW);
-    if (!match) return false;
-    const cells = match[1].split('|').map(c => c.trim()).filter(c => c !== '');
+    if (!CONFIG.PATTERNS.TABLE_ROW.test(line)) return false;
+    // Strip one optional leading/trailing pipe, then split — keeping interior
+    // empty cells so columns stay aligned with the header.
+    const cells = line.trim().replace(/^\|/, '').replace(/\|$/, '').split('|').map(c => c.trim());
 
     // Detect separator line |---|:--:|--:| and capture per-column alignment
     const isSeparator = cells.length > 0 && cells.every(c => /^:?-+:?$/.test(c));
@@ -646,6 +684,7 @@ class MarkPaperParser {
       return true; // Consume the separator without emitting a row
     }
 
+    this.closeParagraph(); this.flushIndentCode();
     this.closeList(); this.closeBlockquote(); this.closeAlert();
     if (!this.state.inTable) {
       this.state.inTable = true;
@@ -672,6 +711,9 @@ class MarkPaperParser {
   processQuotesAndAlerts(line) {
     const isQuoteChar = line.startsWith('>');
     if (!isQuoteChar && !this.state.inAlert && !this.state.inBlockquote) return false;
+
+    // A new quote/alert line ends any open paragraph or indented-code block
+    if (isQuoteChar) { this.closeParagraph(); this.flushIndentCode(); }
 
     // Lazy continuation: keep the raw line when already inside a block
     const content = isQuoteChar ? line.slice(1).trim() : line;
@@ -705,11 +747,16 @@ class MarkPaperParser {
     const match = line.match(CONFIG.PATTERNS.IMAGE);
     if (!match) return false;
 
-    const [, alt, src, attrs] = match;
+    const [, alt, rawSrc, attrs] = match;
+    // Strip an optional ("title") suffix from the destination
+    const destMatch = rawSrc.match(/^\s*(\S+?)(?:\s+"([^"]*)")?\s*$/);
+    const src = destMatch ? destMatch[1] : rawSrc;
+    const title = destMatch && destMatch[2] ? destMatch[2] : '';
     const safeSrc = this.sanitizeUrl(src);
     if (!safeSrc) return false;
 
     this.closeAllBlocks();
+    const titleAttr = title ? ` title="${this.escapeHTML(title)}"` : '';
     let style = '';
     if (attrs) {
       const w = attrs.match(/width\s*=\s*"?([^"}]+)"?/);
@@ -718,13 +765,13 @@ class MarkPaperParser {
         if (dim) style = ` style="width: ${dim};"`;
       }
     }
-    this.html += `<figure class="image-figure">`;
-    this.html += `<img src="${safeSrc}" alt="${this.escapeHTML(alt)}"${style}>`;
+    this.html.push(`<figure class="image-figure">`);
+    this.html.push(`<img src="${safeSrc}" alt="${this.escapeHTML(alt)}"${titleAttr}${style}>`);
     if (alt && alt.trim()) {
       this.globalFigureNum++;
-      this.html += `<figcaption>${CONFIG.STRINGS.FIG_PREFIX} ${this.globalFigureNum} ${this.escapeHTML(alt)}</figcaption>`;
+      this.html.push(`<figcaption>${CONFIG.STRINGS.FIG_PREFIX} ${this.globalFigureNum} ${this.escapeHTML(alt)}</figcaption>`);
     }
-    this.html += `</figure>\n`;
+    this.html.push(`</figure>\n`);
     return true;
   }
 
@@ -740,20 +787,20 @@ class MarkPaperParser {
     const ytMatch = trimmed.match(CONFIG.PATTERNS.VIDEO_YOUTUBE);
     if (ytMatch) {
       this.closeAllBlocks();
-      this.html += this.renderVideoEmbed(
+      this.html.push(this.renderVideoEmbed(
         `https://www.youtube.com/embed/${ytMatch[1]}`,
         'accelerometer; autoplay; clipboard-write; encrypted-media; gyroscope; picture-in-picture'
-      );
+      ));
       return true;
     }
 
     const vimeoMatch = trimmed.match(CONFIG.PATTERNS.VIDEO_VIMEO);
     if (vimeoMatch) {
       this.closeAllBlocks();
-      this.html += this.renderVideoEmbed(
+      this.html.push(this.renderVideoEmbed(
         `https://player.vimeo.com/video/${vimeoMatch[1]}`,
         'autoplay; fullscreen; picture-in-picture'
-      );
+      ));
       return true;
     }
 
@@ -769,6 +816,8 @@ class MarkPaperParser {
    */
   processBlockHtml(line) {
     if (CONFIG.PATTERNS.BLOCK_HTML_START.test(line)) {
+      this.closeParagraph();
+      this.flushIndentCode();
       this.closeList();
       this.closeTable();
       this.closeBlockquote();
@@ -776,7 +825,7 @@ class MarkPaperParser {
 
       // SECURITY: still route through escapeInline for sanitization,
       // but skip the <p> wrapper.
-      this.html += `${this.escapeInline(line)}\n`;
+      this.html.push(`${this.escapeInline(line)}\n`);
       return true;
     }
     return false;
@@ -788,10 +837,38 @@ class MarkPaperParser {
    * @private
    */
   processEmptyLine() {
+    this.closeParagraph(); this.flushIndentCode();
     this.closeList(); this.closeTable(); this.closeBlockquote(); this.closeAlert();
   }
 
   // --- Closers & Rendering Helper Methods ---
+
+  /**
+   * Flushes the buffered soft-wrapped paragraph lines into a single <p>.
+   * Lines join with a space, or with <br> when a hard line break was requested.
+   * @private
+   */
+  closeParagraph() {
+    if (this.state.paragraphBuffer.length === 0) return;
+    let out = '';
+    this.state.paragraphBuffer.forEach((item, i) => {
+      out += this.escapeInline(item.text);
+      if (i < this.state.paragraphBuffer.length - 1) out += item.hardBreak ? '<br>\n' : ' ';
+    });
+    this.html.push(`<p>${out}</p>\n`);
+    this.state.paragraphBuffer = [];
+  }
+
+  /**
+   * Renders the buffered indented-code lines as one code container.
+   * @private
+   */
+  flushIndentCode() {
+    if (!this.state.inIndentCode) return;
+    const code = this.state.indentCodeBuffer.map(l => this.escapeHTML(l)).join('\n');
+    this.html.push(`<div class="code-block-container"><button class="copy-btn">${CONFIG.STRINGS.COPY}</button><pre><code class="language-plaintext">${code}</code></pre></div>\n`);
+    this.state.inIndentCode = false; this.state.indentCodeBuffer = [];
+  }
 
   /**
    * Renders the buffered fenced code block into an HTML code container.
@@ -805,9 +882,9 @@ class MarkPaperParser {
     const lang = rawLang === 'js' ? 'javascript' : rawLang === 'py' ? 'python' : rawLang;
     const langClass = ` class="language-${lang}"`;
 
-    this.html += `<div class="code-block-container"><button class="copy-btn">${CONFIG.STRINGS.COPY}</button><pre><code${langClass}>`;
-    this.html += this.state.codeBuffer.map(l => this.escapeHTML(l)).join('\n');
-    this.html += `</code></pre></div>\n`;
+    this.html.push(`<div class="code-block-container"><button class="copy-btn">${CONFIG.STRINGS.COPY}</button><pre><code${langClass}>`);
+    this.html.push(this.state.codeBuffer.map(l => this.escapeHTML(l)).join('\n'));
+    this.html.push(`</code></pre></div>\n`);
 
     this.state.inCodeBlock = false; this.state.codeBuffer = []; this.state.codeLang = ''; this.state.codeFence = '';
   }
@@ -819,7 +896,7 @@ class MarkPaperParser {
   flushMathBlock() {
     if (!this.state.inMathBlock) return;
     const tex = this.state.mathBuffer.join('\n');
-    this.html += this.renderKaTeX(tex, true);
+    this.html.push(this.renderKaTeX(tex, true));
     this.state.inMathBlock = false; this.state.mathBuffer = [];
   }
 
@@ -830,7 +907,8 @@ class MarkPaperParser {
   closeOneListLevel() {
     if (this.state.listStack.length === 0) return;
     const item = this.state.listStack.pop();
-    this.html += `</${item.type}>\n`;
+    if (item.itemOpen) this.html.push('</li>\n');
+    this.html.push(`</${item.type}>\n`);
   }
 
   /**
@@ -847,22 +925,22 @@ class MarkPaperParser {
     if (!this.state.inTable) return;
     const alignAttr = (i) => this.state.tableAlign[i] ? ` style="text-align:${this.state.tableAlign[i]}"` : '';
 
-    this.html += '<table>\n';
+    this.html.push('<table>\n');
     if (this.state.tableHeader) {
-      this.html += '<thead>\n<tr>\n';
-      this.state.tableHeader.forEach((h, i) => this.html += `<th${alignAttr(i)}>${this.escapeInline(h)}</th>\n`);
-      this.html += '</tr>\n</thead>\n';
+      this.html.push('<thead>\n<tr>\n');
+      this.state.tableHeader.forEach((h, i) => this.html.push(`<th${alignAttr(i)}>${this.escapeInline(h)}</th>\n`));
+      this.html.push('</tr>\n</thead>\n');
     }
     if (this.state.tableRows.length > 0) {
-      this.html += '<tbody>\n';
+      this.html.push('<tbody>\n');
       this.state.tableRows.forEach(row => {
-        this.html += '<tr>\n';
-        row.forEach((cell, i) => this.html += `<td${alignAttr(i)}>${this.escapeInline(cell)}</td>\n`);
-        this.html += '</tr>\n';
+        this.html.push('<tr>\n');
+        row.forEach((cell, i) => this.html.push(`<td${alignAttr(i)}>${this.escapeInline(cell)}</td>\n`));
+        this.html.push('</tr>\n');
       });
-      this.html += '</tbody>\n';
+      this.html.push('</tbody>\n');
     }
-    this.html += '</table>\n';
+    this.html.push('</table>\n');
     this.state.inTable = false; this.state.tableHeader = null; this.state.tableRows = []; this.state.tableAlign = [];
   }
 
@@ -872,9 +950,9 @@ class MarkPaperParser {
    */
   closeBlockquote() {
     if (!this.state.inBlockquote) return;
-    this.html += '<blockquote>';
-    this.html += this.renderBufferedParagraphs(this.state.blockquoteBuffer);
-    this.html += '</blockquote>\n';
+    this.html.push('<blockquote>');
+    this.html.push(this.renderBufferedParagraphs(this.state.blockquoteBuffer));
+    this.html.push('</blockquote>\n');
     this.state.inBlockquote = false; this.state.blockquoteBuffer = [];
   }
 
@@ -886,11 +964,11 @@ class MarkPaperParser {
     if (!this.state.inAlert) return;
     const title = CONFIG.STRINGS.ALERT_TITLES[this.state.alertType] || 'Alert';
 
-    this.html += `<div class="alert alert-${this.state.alertType}">`;
-    this.html += `<div class="alert-header"><span class="alert-title">${title}</span></div>`;
-    this.html += `<div class="alert-content">`;
-    this.html += this.renderBufferedParagraphs(this.state.alertBuffer);
-    this.html += `</div></div>\n`;
+    this.html.push(`<div class="alert alert-${this.state.alertType}">`);
+    this.html.push(`<div class="alert-header"><span class="alert-title">${title}</span></div>`);
+    this.html.push(`<div class="alert-content">`);
+    this.html.push(this.renderBufferedParagraphs(this.state.alertBuffer));
+    this.html.push(`</div></div>\n`);
 
     this.state.inAlert = false; this.state.alertBuffer = []; this.state.alertType = '';
   }
@@ -900,6 +978,7 @@ class MarkPaperParser {
    * @private
    */
   closeAllBlocks() {
+    this.closeParagraph(); this.flushIndentCode();
     this.flushCodeBlock(); this.flushMathBlock(); this.closeList();
     this.closeTable(); this.closeAlert(); this.closeBlockquote();
   }
@@ -981,16 +1060,19 @@ class MarkPaperParser {
    */
   appendSectionFootnotes() {
     if (this.sectionFootnotes.length === 0) return;
-    this.html += '<div class="footnotes">\n';
+    const epoch = this.footnoteEpoch;
+    this.html.push('<div class="footnotes">\n');
     this.sectionFootnotes.forEach(id => {
       if (this.footnotesDef[id]) {
         // SECURITY: escape the id before it reaches the id attribute / label.
+        // The epoch suffix keeps ids unique when a footnote recurs across sections.
         const safeId = this.escapeHTML(id);
-        this.html += `<div class="footnote" id="footnote-${safeId}"><sup>${safeId}</sup> ${this.escapeInline(this.footnotesDef[id])}</div>\n`;
+        this.html.push(`<div class="footnote" id="footnote-${safeId}-${epoch}"><sup>${safeId}</sup> ${this.escapeInline(this.footnotesDef[id])}</div>\n`);
       }
     });
-    this.html += '</div>\n';
+    this.html.push('</div>\n');
     this.sectionFootnotes = [];
+    this.footnoteEpoch++;
   }
 
   /**
@@ -1177,10 +1259,17 @@ class MarkPaperParser {
    * // -> '<strong>bold</strong> and <code>code</code>'
    */
   escapeInline(text) {
-    const mathMap = new Map(); let mCounter = 0;
+    // Protect backslash-escaped punctuation first so it survives every later pass
+    const escMap = new Map(); let eCounter = 0;
+    text = text.replace(/\\([\\`*_{}\[\]()#+\-.!~$|])/g, (match, ch) => {
+      const key = `${PH_OPEN}ESC${eCounter++}${PH_CLOSE}`;
+      escMap.set(key, this.escapeHTML(ch));
+      return key;
+    });
 
-    // Protect inline math ($...$)
-    text = text.replace(/\$((?:[^\$]|\\\$)+)\$/g, (match, tex) => {
+    // Protect inline math ($...$); currency-safe pattern leaves "$5 and $10" alone
+    const mathMap = new Map(); let mCounter = 0;
+    text = text.replace(CONFIG.PATTERNS.INLINE_MATH, (match, tex) => {
       const key = `${PH_OPEN}MATH${mCounter++}${PH_CLOSE}`;
       mathMap.set(key, this.renderKaTeX(tex, false));
       return key;
@@ -1216,30 +1305,51 @@ class MarkPaperParser {
       return key;
     });
 
-    // Parse Markdown emphasis syntax
+    // Parse Markdown emphasis syntax. Triple markers first; underscore variants
+    // require word boundaries so intraword underscores (snake_case) stay literal.
+    escaped = escaped.replace(/\*\*\*(.+?)\*\*\*/g, '<strong><em>$1</em></strong>');
+    escaped = escaped.replace(/(?<![\w*])___(?=\S)(.+?)(?<=\S)___(?![\w])/g, '<strong><em>$1</em></strong>');
     escaped = escaped.replace(/\*\*(.+?)\*\*/g, '<strong>$1</strong>');
+    escaped = escaped.replace(/(?<![\w_])__(?=\S)(.+?)(?<=\S)__(?![\w])/g, '<strong>$1</strong>');
     escaped = escaped.replace(/\*(.+?)\*/g, '<em>$1</em>');
+    escaped = escaped.replace(/(?<![\w_])_(?=\S)(.+?)(?<=\S)_(?![\w])/g, '<em>$1</em>');
     escaped = escaped.replace(/~~(.+?)~~/g, '<s>$1</s>');
 
-    // Images
-    escaped = escaped.replace(/!\[([^\]]*)\]\(([^)]+)\)/g, (match, alt, src) => {
-      const safeSrc = this.sanitizeUrl(src);
-      return safeSrc ? `<img src="${safeSrc}" alt="${this.escapeHTML(alt)}">` : alt;
+    // Images (with optional "title")
+    escaped = escaped.replace(/!\[([^\]]*)\]\(([^)]+)\)/g, (match, alt, dest) => {
+      const { url, title } = this.parseLinkDest(dest);
+      const safeSrc = this.sanitizeUrl(url);
+      if (!safeSrc) return alt;
+      const titleAttr = title ? ` title="${this.escapeHTML(title)}"` : '';
+      return `<img src="${safeSrc}" alt="${this.escapeHTML(alt)}"${titleAttr}>`;
     });
 
-    // Links
-    escaped = escaped.replace(/\[([^\]]+)\]\(([^)]+)\)/g, (match, label, href) => {
-      const safeHref = this.sanitizeUrl(href);
-      return safeHref ? `<a href="${safeHref}" target="_blank" rel="noopener noreferrer">${label}</a>` : label;
-    });
-
-    // Footnote references
+    // Footnote references (epoch keeps the anchor unique across section flushes)
     escaped = escaped.replace(/\[\^([^\]]+)\]/g, (match, id) => {
       if (!this.sectionFootnotes.includes(id)) this.sectionFootnotes.push(id);
       // SECURITY: this runs after the main escaping pass, so the captured id must
       // be escaped here or it breaks out of the href/class attributes.
       const safeId = this.escapeHTML(id);
-      return `<sup><a href="#footnote-${safeId}" class="footnote-ref">${safeId}</a></sup>`;
+      return `<sup><a href="#footnote-${safeId}-${this.footnoteEpoch}" class="footnote-ref">${safeId}</a></sup>`;
+    });
+
+    // Reference-style links: [text][ref] and collapsed [text][]
+    escaped = escaped.replace(/\[([^\]]+)\]\[([^\]]*)\]/g, (match, label, ref) => {
+      const def = this.linkDefs[(ref || label).toLowerCase()];
+      if (!def) return match;
+      const safeHref = this.sanitizeUrl(def.url);
+      if (!safeHref) return label;
+      const titleAttr = def.title ? ` title="${this.escapeHTML(def.title)}"` : '';
+      return `<a href="${safeHref}" target="_blank" rel="noopener noreferrer"${titleAttr}>${label}</a>`;
+    });
+
+    // Inline links (with optional "title")
+    escaped = escaped.replace(/\[([^\]]+)\]\(([^)]+)\)/g, (match, label, dest) => {
+      const { url, title } = this.parseLinkDest(dest);
+      const safeHref = this.sanitizeUrl(url);
+      if (!safeHref) return label;
+      const titleAttr = title ? ` title="${this.escapeHTML(title)}"` : '';
+      return `<a href="${safeHref}" target="_blank" rel="noopener noreferrer"${titleAttr}>${label}</a>`;
     });
 
     // Auto-link bare URLs; the two-alternative regex skips content inside HTML tags
@@ -1249,10 +1359,24 @@ class MarkPaperParser {
       return `<a href="${url}" target="_blank" rel="noopener noreferrer">${url}</a>`;
     });
 
-    // Restore inline code spans
+    // Restore inline code spans, then the backslash-escaped literals
     codeMap.forEach((val, key) => { escaped = escaped.replace(key, () => val); });
+    escMap.forEach((val, key) => { escaped = escaped.replace(key, () => val); });
 
     return escaped;
+  }
+
+  /**
+   * Splits a Markdown link/image destination into its URL and optional title.
+   * @private
+   * @param {string} dest - The raw text between the parentheses.
+   * @returns {{url: string, title: string}} - The parsed URL and title.
+   * @example
+   * parser.parseLinkDest('https://x.com "Home"'); // -> { url: 'https://x.com', title: 'Home' }
+   */
+  parseLinkDest(dest) {
+    const m = dest.match(/^\s*(\S+?)(?:\s+"([^"]*)")?\s*$/);
+    return m ? { url: m[1], title: m[2] || '' } : { url: dest.trim(), title: '' };
   }
 }
 
@@ -1269,7 +1393,7 @@ class MarkPaperUI {
   constructor() {
     this.dom = {};
     this.settings = new SettingsController(this);
-    this.scrollSpyTick = null; // Live scrollspy handler, refreshed per document
+    this.lastFocused = null; // Element to restore focus to when a panel closes
     this.onUploadDocument = null; // Callback invoked with uploaded Markdown text
   }
 
@@ -1280,10 +1404,55 @@ class MarkPaperUI {
     this.createDomElements();
     this.setupMenu();
     this.setupUpload();
-    this.setupProgressBar();
-    this.setupScrollHistory();
-    this.setupScrollSpy();
+    this.setupScroll();
     this.settings.init();
+    this.setupSkipLink();
+    this.restoreScroll();
+  }
+
+  /**
+   * Inserts a "skip to content" link as the first focusable element.
+   * @private
+   */
+  setupSkipLink() {
+    const content = document.getElementById('content');
+    if (content) content.setAttribute('tabindex', '-1');
+    const skip = document.createElement('a');
+    skip.className = 'skip-link';
+    skip.href = '#content';
+    skip.textContent = 'Skip to content';
+    skip.addEventListener('click', (e) => {
+      e.preventDefault();
+      if (content) { content.focus(); content.scrollIntoView({ behavior: this.scrollBehavior() }); }
+    });
+    document.body.insertBefore(skip, document.body.firstChild);
+  }
+
+  /**
+   * Returns the visible, focusable elements inside a container, in tab order.
+   * @private
+   * @param {HTMLElement} container - The panel to scan.
+   * @returns {HTMLElement[]} - Focusable descendants.
+   */
+  getFocusable(container) {
+    const sel = 'a[href], button:not([disabled]), input:not([disabled]), select:not([disabled]), [tabindex]:not([tabindex="-1"])';
+    // getClientRects() is reliable inside position:fixed panels (offsetParent is not)
+    return Array.from(container.querySelectorAll(sel)).filter(el => el.getClientRects().length > 0);
+  }
+
+  /**
+   * Keeps Tab focus cycling within an open panel (basic focus trap).
+   * @private
+   * @param {HTMLElement} container - The open panel.
+   * @param {KeyboardEvent} e - The keydown event.
+   */
+  trapTab(container, e) {
+    const f = this.getFocusable(container);
+    if (f.length === 0) return;
+    const first = f[0];
+    const last = f[f.length - 1];
+    if (e.shiftKey && document.activeElement === first) { e.preventDefault(); last.focus(); }
+    else if (!e.shiftKey && document.activeElement === last) { e.preventDefault(); first.focus(); }
   }
 
   /**
@@ -1296,7 +1465,7 @@ class MarkPaperUI {
     this.setupAnchors();
     this.triggerSyntaxHighlight();
     this.updateDocumentTitle();
-    if (this.scrollSpyTick) this.scrollSpyTick();
+    this.updateScrollSpy();
   }
 
   /**
@@ -1332,28 +1501,42 @@ class MarkPaperUI {
   }
 
   /**
-   * Restores the saved scroll position and keeps it updated while scrolling.
+   * Restores the scroll position saved for the current document.
    * @private
    */
-  setupScrollHistory() {
-    const currentFile = window.location.search || 'default';
+  restoreScroll() {
     try {
-      const savedPos = localStorage.getItem(CONFIG.STORAGE_KEYS.SCROLL_POS);
-      if (savedPos) {
-        const data = JSON.parse(savedPos);
-        if (data.file === currentFile && typeof data.y === 'number') {
-          setTimeout(() => window.scrollTo(0, data.y), CONFIG.UI.SCROLL_RESTORE_DELAY_MS);
-        }
+      const saved = localStorage.getItem(CONFIG.STORAGE_KEYS.SCROLL_POS);
+      if (!saved) return;
+      const data = JSON.parse(saved);
+      const currentFile = window.location.search || 'default';
+      if (data.file === currentFile && typeof data.y === 'number') {
+        setTimeout(() => window.scrollTo(0, data.y), CONFIG.UI.SCROLL_RESTORE_DELAY_MS);
       }
     } catch (e) {
       console.error('MarkPaper: failed to read scroll history', e);
     }
-    // PERF: throttle persistence to one LocalStorage write per animation frame
+  }
+
+  /**
+   * Single rAF-throttled scroll listener driving the progress bar, scrollspy,
+   * and position persistence (replaces three separate per-event listeners).
+   * @private
+   */
+  setupScroll() {
+    const bar = document.getElementById('reading-progress');
+    const currentFile = window.location.search || 'default';
     let pending = false;
     window.addEventListener('scroll', () => {
       if (pending) return;
       pending = true;
       requestAnimationFrame(() => {
+        if (bar) {
+          const st = document.documentElement.scrollTop || document.body.scrollTop;
+          const sh = document.documentElement.scrollHeight - document.documentElement.clientHeight;
+          bar.style.width = `${sh > 0 ? (st / sh) * 100 : 0}%`;
+        }
+        this.updateScrollSpy();
         try {
           localStorage.setItem(CONFIG.STORAGE_KEYS.SCROLL_POS, JSON.stringify({ file: currentFile, y: window.scrollY }));
         } catch (e) {
@@ -1361,21 +1544,6 @@ class MarkPaperUI {
         }
         pending = false;
       });
-    }, { passive: true });
-  }
-
-  /**
-   * Updates the top progress bar as the user scrolls.
-   * @private
-   */
-  setupProgressBar() {
-    const bar = document.getElementById('reading-progress');
-    if (!bar) return;
-    window.addEventListener('scroll', () => {
-      const scrollTop = document.documentElement.scrollTop || document.body.scrollTop;
-      const scrollHeight = document.documentElement.scrollHeight - document.documentElement.clientHeight;
-      const scrolled = scrollHeight > 0 ? (scrollTop / scrollHeight) * 100 : 0;
-      bar.style.width = `${scrolled}%`;
     }, { passive: true });
   }
 
@@ -1442,6 +1610,10 @@ class MarkPaperUI {
       <ul id="table-of-contents" class="table-of-contents"></ul>
     `;
     document.body.insertBefore(nav, btn.nextSibling);
+    // A11y: a closed off-screen menu must not be keyboard-reachable;
+    // tabindex lets it receive focus when its table of contents is empty
+    nav.inert = true;
+    nav.setAttribute('tabindex', '-1');
     this.dom.menu = nav;
     this.dom.toc = nav.querySelector('#table-of-contents');
 
@@ -1463,32 +1635,51 @@ class MarkPaperUI {
    * @private
    */
   setupMenu() {
-    const toggle = () => {
-      const open = this.dom.menu.classList.toggle('open');
-      this.dom.overlay.classList.toggle('show');
-      this.dom.hamburger.classList.toggle('active');
-      this.dom.hamburger.setAttribute('aria-expanded', String(open));
-    };
-    this.dom.hamburger.addEventListener('click', (e) => { e.preventDefault(); toggle(); });
+    this.dom.hamburger.addEventListener('click', (e) => {
+      e.preventDefault();
+      if (this.dom.menu.classList.contains('open')) this.closeMenu();
+      else this.openMenu();
+    });
     this.dom.overlay.addEventListener('click', () => {
-      if (this.settings.visible) {
-        this.settings.close();
-      } else {
-        this.closeMenu();
+      if (this.settings.visible) this.settings.close();
+      else this.closeMenu();
+    });
+    document.addEventListener('keydown', (e) => {
+      if (e.key === 'Escape') { this.closeMenu(); this.settings.close(); return; }
+      if (e.key === 'Tab') {
+        if (this.dom.menu.classList.contains('open')) this.trapTab(this.dom.menu, e);
+        else if (this.settings.visible) this.trapTab(this.settings.domModal, e);
       }
     });
-    document.addEventListener('keydown', (e) => { if (e.key === 'Escape') { this.closeMenu(); this.settings.close(); } });
   }
 
   /**
-   * Closes the side menu.
+   * Opens the side menu and moves focus into it.
+   * @private
+   */
+  openMenu() {
+    this.lastFocused = document.activeElement;
+    this.dom.menu.inert = false;
+    this.dom.menu.classList.add('open');
+    this.dom.overlay.classList.add('show');
+    this.dom.hamburger.classList.add('active');
+    this.dom.hamburger.setAttribute('aria-expanded', 'true');
+    const f = this.getFocusable(this.dom.menu);
+    (f.length ? f[0] : this.dom.menu).focus();
+  }
+
+  /**
+   * Closes the side menu and restores focus to the trigger.
    * @private
    */
   closeMenu() {
+    const wasOpen = this.dom.menu.classList.contains('open');
     this.dom.menu.classList.remove('open');
     this.dom.overlay.classList.remove('show');
     this.dom.hamburger.classList.remove('active');
     this.dom.hamburger.setAttribute('aria-expanded', 'false');
+    this.dom.menu.inert = true;
+    if (wasOpen && this.lastFocused) { this.lastFocused.focus(); this.lastFocused = null; }
   }
 
   /**
@@ -1622,24 +1813,21 @@ class MarkPaperUI {
   }
 
   /**
-   * Sets up the scroll listener that highlights the current section in the TOC.
-   * The handler queries the DOM live so it keeps working after re-renders.
+   * Highlights the current section in the TOC. Queries the DOM live so it keeps
+   * working after re-renders; called from the throttled scroll handler and after
+   * each document render.
    * @private
    */
-  setupScrollSpy() {
-    this.scrollSpyTick = () => {
-      const headings = document.querySelectorAll('#content h2, #content h3');
-      if (headings.length === 0) return;
-      const links = this.dom.toc.querySelectorAll('a');
-      let currentId = '';
-      headings.forEach(h => {
-        if (window.scrollY + CONFIG.UI.SCROLLSPY_OFFSET_PX >= h.offsetTop) currentId = h.id;
-      });
-      links.forEach(l => {
-        l.classList.toggle('active', l.getAttribute('href') === `#${currentId}`);
-      });
-    };
-    window.addEventListener('scroll', this.scrollSpyTick, { passive: true });
+  updateScrollSpy() {
+    const headings = document.querySelectorAll('#content h2, #content h3');
+    if (headings.length === 0) return;
+    let currentId = '';
+    headings.forEach(h => {
+      if (window.scrollY + CONFIG.UI.SCROLLSPY_OFFSET_PX >= h.offsetTop) currentId = h.id;
+    });
+    this.dom.toc.querySelectorAll('a').forEach(l => {
+      l.classList.toggle('active', l.getAttribute('href') === `#${currentId}`);
+    });
   }
 
   /**
@@ -1765,7 +1953,9 @@ class SettingsController {
     const modal = document.createElement('div');
     modal.className = 'settings-modal';
     modal.setAttribute('role', 'dialog');
+    modal.setAttribute('aria-modal', 'true');
     modal.setAttribute('aria-label', CONFIG.STRINGS.SETTINGS);
+    modal.inert = true; // A11y: not reachable until opened
     modal.innerHTML = `
       <div class="settings-header">
         <h3>${CONFIG.STRINGS.SETTINGS}</h3>
@@ -1899,22 +2089,26 @@ class SettingsController {
 
   /** Toggles the visibility of the settings modal. */
   toggle() {
-    this.visible = !this.visible;
-    if (this.visible) {
-      this.domModal.classList.add('open');
-      this.ui.dom.overlay.classList.add('show');
-    } else {
-      this.close();
-    }
+    if (this.visible) { this.close(); return; }
+    this.visible = true;
+    this.ui.lastFocused = document.activeElement;
+    this.domModal.inert = false;
+    this.domModal.classList.add('open');
+    this.ui.dom.overlay.classList.add('show');
+    const focusables = this.ui.getFocusable(this.domModal);
+    if (focusables.length) focusables[0].focus();
   }
 
-  /** Closes the settings modal. */
+  /** Closes the settings modal and restores focus to the trigger. */
   close() {
+    const wasVisible = this.visible;
     this.visible = false;
     this.domModal.classList.remove('open');
+    this.domModal.inert = true;
     if (!this.ui.dom.menu.classList.contains('open')) {
       this.ui.dom.overlay.classList.remove('show');
     }
+    if (wasVisible && this.ui.lastFocused) { this.ui.lastFocused.focus(); this.ui.lastFocused = null; }
   }
 }
 
