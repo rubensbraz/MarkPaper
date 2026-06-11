@@ -616,7 +616,7 @@ table code {
     font-family: var(--current-font-family);
     line-height: 1.6;
     font-feature-settings: "palt" 1, "pkna" 1;
-    color: #212529;
+    color: var(--text-color);
 }
 
 .alert-header {
@@ -920,7 +920,7 @@ h6:hover .heading-anchor {
 
 .table-of-contents li {
     border-bottom: 1px solid var(--border-color);
-    margin-bottom: 0px !important;
+    margin-bottom: 0;
 }
 
 .table-of-contents a {

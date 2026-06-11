@@ -130,7 +130,7 @@ class MarkPaperParser {
       inTable: false, tableHeader: null, tableRows: [],
       inBlockquote: false, blockquoteBuffer: [],
       inAlert: false, alertType: '', alertBuffer: [],
-      listStack: [], listCounters: [] // Handles nested lists
+      listStack: [] // Handles nested lists
     };
   }
 
@@ -432,19 +432,10 @@ class MarkPaperParser {
       this.closeOneListLevel();
     }
 
-    // Open new level if needed (Target is deeper than current)
-    // Using 'while' handles cases where we might need to recover structure,
-    // though adaptive logic usually results in just 1 iteration max.
+    // Open new levels until the stack reaches targetLevel
     while (this.state.listStack.length <= targetLevel) {
-      if (this.state.listStack.length === targetLevel + 1 && this.state.listStack[targetLevel].type !== type) {
-        this.closeOneListLevel(); // Switch type (ul <-> ol)
-      }
-
-      if (this.state.listStack.length <= targetLevel) {
-        this.html += `<${type}>\n`;
-        // Store 'indent' in the stack to compare against future lines
-        this.state.listStack.push({ type: type, level: targetLevel, indent: indent });
-      }
+      this.html += `<${type}>\n`;
+      this.state.listStack.push({ type: type, indent: indent });
     }
 
     // Handle Task List Items [x]
@@ -626,9 +617,7 @@ class MarkPaperParser {
     return false;
   }
 
-  /**
-   * Handles empty lines to determine if blocks should be closed.
-   */
+  /** Forwards empty lines to open blocks, or closes paragraph-level blocks on blank line. */
   processEmptyLine() {
     if (this.state.inCodeBlock) this.state.codeBuffer.push('');
     else if (this.state.inMathBlock) this.state.mathBuffer.push('');
@@ -642,7 +631,10 @@ class MarkPaperParser {
 
   // --- Closers & Rendering Helper Methods ---
 
-  /** Converts buffered code lines into HTML. */
+  /**
+   * Renders the buffered fenced code block into an HTML code container.
+   * Maps common language aliases (js, py) to PrismJS class names.
+   */
   flushCodeBlock() {
     if (!this.state.inCodeBlock) return;
     const rawLang = this.state.codeLang.toLowerCase() || 'plaintext';
@@ -654,10 +646,10 @@ class MarkPaperParser {
     this.html += this.state.codeBuffer.map(l => this.escapeHTML(l)).join('\n');
     this.html += `</code></pre></div>\n`;
 
-    this.state.inCodeBlock = false; this.state.codeBuffer = []; this.state.codeLang = '';
+    this.state.inCodeBlock = false; this.state.codeBuffer = []; this.state.codeLang = ''; this.state.codeFence = '';
   }
 
-  /** Converts buffered math lines into KaTeX HTML. */
+  /** Renders the buffered math block via KaTeX in display mode. */
   flushMathBlock() {
     if (!this.state.inMathBlock) return;
     const tex = this.state.mathBuffer.join('\n');
@@ -721,7 +713,7 @@ class MarkPaperParser {
     this.state.inAlert = false; this.state.alertBuffer = []; this.state.alertType = '';
   }
 
-  /** Helper to close everything at once (used at EOF or HR). */
+  /** Closes all open block contexts. Called at EOF and before horizontal rules. */
   closeAllBlocks() {
     this.flushCodeBlock(); this.flushMathBlock(); this.closeList();
     this.closeTable(); this.closeAlert(); this.closeBlockquote();
@@ -745,7 +737,12 @@ class MarkPaperParser {
     return output;
   }
 
-  /** Generates the document title header. */
+  /**
+   * Generates the document title block HTML.
+   * @param {string} title - The document title.
+   * @param {Object} meta - Optional metadata fields (author, date, institution, editor).
+   * @returns {string} - HTML string.
+   */
   renderDocumentHeader(title, meta) {
     let h = `<header class="document-header">\n`;
     h += `<h1>${this.escapeInline(title)}</h1>\n`;
@@ -757,7 +754,10 @@ class MarkPaperParser {
     return h;
   }
 
-  /** Generates the footer. */
+  /**
+   * Generates the page footer HTML with project attribution links.
+   * @returns {string} - HTML string.
+   */
   generateFooter() {
     return `
     <footer class="markpaper-footer">
@@ -767,7 +767,7 @@ class MarkPaperParser {
     </footer>`;
   }
 
-  /** Renders footnotes collected for the current section. */
+  /** Flushes accumulated footnotes for the current section into the HTML output. */
   appendSectionFootnotes() {
     if (this.sectionFootnotes.length === 0) return;
     this.html += '<div class="footnotes">\n';
@@ -780,7 +780,12 @@ class MarkPaperParser {
     this.sectionFootnotes = [];
   }
 
-  /** Wrapper for KaTeX rendering with error handling. */
+  /**
+   * Renders a TeX string via KaTeX, with a plain-text fallback when KaTeX is unavailable.
+   * @param {string} tex - LaTeX expression.
+   * @param {boolean} [displayMode=false] - Whether to render in display (block) mode.
+   * @returns {string} - HTML string.
+   */
   renderKaTeX(tex, displayMode = false) {
     if (typeof katex === 'undefined') return displayMode ? `<pre>${tex}</pre>` : `<code>${tex}</code>`;
     try {
@@ -792,14 +797,20 @@ class MarkPaperParser {
 
   // --- Sanitization & Escaping ---
 
-  /** Escapes basic HTML characters. */
+  /**
+   * Escapes basic HTML special characters to their entity equivalents.
+   * @param {string} text - Input string.
+   * @returns {string} - HTML-safe string.
+   */
   escapeHTML(text) {
     return text.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;').replace(/'/g, '&#39;');
   }
 
   /**
-   * Sanitizes HTML string using whitelist.
-   * Removes dangerous attributes (on*, javascript:).
+   * Sanitizes an HTML string using an allowlist approach.
+   * Removes disallowed tags and dangerous attributes (on*, javascript:, data:).
+   * @param {string} text - Raw HTML string.
+   * @returns {string} - Sanitized HTML string.
    */
   sanitizeHTML(text) {
     return text.replace(/<(\/?)([\w-]+)([^>]*)>/gi, (match, slash, tag, attrs) => {
@@ -889,12 +900,12 @@ class MarkPaperParser {
       return `<sup><a href="#footnote-${id}" class="footnote-ref">${id}</a></sup>`;
     });
 
-    // Auto Links
-    const urlPattern = /(https?:\/\/[^\s<>"']+|ftp:\/\/[^\s<>"']+)/g;
-    escaped = escaped.replace(urlPattern, (match) => { return `<a href="${match}" target="_blank" rel="noopener noreferrer">${match}</a>`; });
-
-    // Fix nested links bug
-    escaped = escaped.replace(/href="<a href="([^"]+)"[^>]*>[^<]+<\/a>"/g, 'href="$1"');
+    // Auto-link bare URLs; the two-alternative regex skips content inside HTML tags
+    // to prevent wrapping URLs that already appear inside href/src attributes.
+    escaped = escaped.replace(/(<[^>]+>)|((https?|ftp):\/\/[^\s<>"']+)/g, (match, tag, url) => {
+      if (tag) return tag;
+      return `<a href="${url}" target="_blank" rel="noopener noreferrer">${url}</a>`;
+    });
 
     return escaped;
   }
