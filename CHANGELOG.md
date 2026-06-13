@@ -10,6 +10,10 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/) and 
 - **Dark mode alerts** — alert backgrounds were hardcoded light colors, leaving light text unreadable in dark mode. They now mix the alert hue into `--background-color`, so they stay subtle in light mode and become legible dark tints in dark mode.
 - **Printing in dark mode** — the settings controller sets theme colors as inline custom properties on `<html>`, which leaked into print and rendered headings, tables, code, blockquotes, alerts and footnotes as near-invisible light-gray text on white. The print stylesheet now resets the theme variables to a light palette with `!important`, and forces Prism-highlighted code to monochrome so it prints legibly in any theme.
 
+### Changed
+
+- **Print output overhauled.** Only the rendered document prints now — all chrome (buttons, side menu, overlay, progress bar, drop zone, settings modal, skip link) is hidden via `body > *:not(main)`, which also excludes any chrome added later. Added `@page` margins, component backgrounds/borders forced to print (`print-color-adjust: exact`), long code lines wrapped instead of clipped, repeating table headers across pages, orphan/widow control, page-break avoidance for images/rows/list items, and black underlined links with their URL exposed.
+
 ## [1.5.0] - 2026-06-11
 
 ### Added

@@ -1409,18 +1409,22 @@ body.drag-active .drop-zone {
    9. PRINT
    ------------------------------------------------------------------ */
 
+/* Consistent paper margins on every printed page */
+@page {
+    margin: 2cm;
+}
+
 @media print {
 
-    /* Hide all interactive chrome */
-    .hamburger-btn,
-    .settings-btn,
-    .upload-btn,
-    .upload-input,
-    .side-menu,
-    .overlay,
-    .settings-modal,
-    .reading-progress,
-    .drop-zone,
+    /* Print the document only. Every direct child of <body> is interactive
+       chrome (buttons, side menu, overlay, progress bar, drop zone, modal,
+       skip link) except <main>, which wraps the rendered article. Hiding the
+       set this way is future-proof: chrome added later is excluded automatically. */
+    body > *:not(main) {
+        display: none !important;
+    }
+
+    /* In-content controls live inside <main>, so hide them explicitly */
     .heading-anchor,
     .copy-btn {
         display: none !important;
@@ -1449,6 +1453,26 @@ body.drag-active .drop-zone {
         color: #000000;
     }
 
+    /* Keep the title block tight at the top of the first page */
+    h1 {
+        margin-top: 0;
+        padding-top: 0;
+    }
+
+    /* Print component backgrounds and borders that browsers drop by default,
+       so alerts, code, table headers and quotes keep their visual structure. */
+    pre,
+    .code-block-container,
+    blockquote,
+    .alert,
+    mark,
+    table,
+    th,
+    thead {
+        -webkit-print-color-adjust: exact;
+        print-color-adjust: exact;
+    }
+
     /* Prism's dark theme would leave light tokens on a light page; force
        monochrome code so highlighted blocks print legibly in any theme. */
     pre[class*="language-"],
@@ -1459,17 +1483,36 @@ body.drag-active .drop-zone {
         text-shadow: none !important;
     }
 
+    /* Wrap long code lines instead of clipping them at the page edge */
+    pre,
+    pre code {
+        overflow: visible !important;
+        white-space: pre-wrap !important;
+        word-wrap: break-word;
+        overflow-wrap: break-word;
+    }
+
+    /* Links print in black with the URL exposed (see rule below) */
+    a {
+        color: #000000 !important;
+        text-decoration: underline;
+    }
+
     /* Avoid awkward page breaks inside grouped content */
     figure,
     table,
     pre,
     blockquote,
     .alert,
-    .video-container {
+    .video-container,
+    img,
+    li,
+    tr {
         page-break-inside: avoid;
         break-inside: avoid;
     }
 
+    /* Keep headings with the text that follows them */
     h1,
     h2,
     h3,
@@ -1480,20 +1523,35 @@ body.drag-active .drop-zone {
         break-after: avoid;
     }
 
-    /* Expand external link targets for the printed page */
+    /* Repeat table headers across page breaks */
+    thead {
+        display: table-header-group;
+    }
+
+    /* Reduce stranded lines at page boundaries */
+    p,
+    li,
+    blockquote {
+        orphans: 3;
+        widows: 3;
+    }
+
+    /* Expand external link targets for the printed page. Fragment and internal
+       links are left untouched so footnote refs stay clean. */
     a[href^="http"]::after {
         content: " (" attr(href) ")";
         font-size: 0.85em;
+        font-style: italic;
         word-break: break-all;
     }
 
-    /* Embeds cannot print; show their source instead */
+    /* Embeds cannot print; collapse the responsive box so it leaves no gap */
     .video-container {
         padding-bottom: 0 !important;
         height: auto !important;
     }
 
     .video-container iframe {
-        display: none;
+        display: none !important;
     }
 }
