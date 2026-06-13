@@ -5,7 +5,7 @@
  * @description A clean and academic Markdown renderer for the web.
  * Includes support for extended syntax (alerts, footnotes), KaTeX, PrismJS,
  * theme management, and local file upload (button + drag-and-drop).
- * @version 1.5.0
+ * @version 1.5.1
  */
 
 // ============================================================================

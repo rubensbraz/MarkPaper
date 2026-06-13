@@ -59,16 +59,18 @@
     --menu-background-active: var(--background-color);
 
     /* Alert Colors (GitHub Style) */
+    /* Backgrounds are mixed from the alert hue into --background-color so they
+       stay subtle in light mode and turn into dark tints (readable) in dark mode. */
     --alert-note-border: #5889b7;
-    --alert-note-bg: #eef5fc;
+    --alert-note-bg: color-mix(in srgb, var(--alert-note-border) 10%, var(--background-color));
     --alert-warning-border: #b78d48;
-    --alert-warning-bg: #fcf8e3;
+    --alert-warning-bg: color-mix(in srgb, var(--alert-warning-border) 10%, var(--background-color));
     --alert-important-border: #8a6d3b;
-    --alert-important-bg: #fdf7f7;
+    --alert-important-bg: color-mix(in srgb, var(--alert-important-border) 10%, var(--background-color));
     --alert-tip-border: #5f9a6f;
-    --alert-tip-bg: #eefaf0;
+    --alert-tip-bg: color-mix(in srgb, var(--alert-tip-border) 10%, var(--background-color));
     --alert-caution-border: #b85c5c;
-    --alert-caution-bg: #fceeee;
+    --alert-caution-bg: color-mix(in srgb, var(--alert-caution-border) 10%, var(--background-color));
 
     /* Syntax Highlighting */
     --code-text-color: var(--text-color);
@@ -1424,6 +1426,20 @@ body.drag-active .drop-zone {
         display: none !important;
     }
 
+    /* Force the light palette for print regardless of the active theme. The
+       settings controller sets the theme variables inline on <html>; an author
+       !important declaration outranks an inline normal one, so this overrides
+       dark mode and keeps everything that resolves a var() readable on paper. */
+    html {
+        --text-color: #000000 !important;
+        --background-color: #ffffff !important;
+        --accent-color: #1a1a1a !important;
+        --border-color: #cccccc !important;
+        --modal-header-bg: #f5f5f5 !important;
+        --light-gray-color: #f5f5f5 !important;
+        --code-background: #f5f5f5 !important;
+    }
+
     html,
     body {
         max-width: none;
@@ -1431,6 +1447,16 @@ body.drag-active .drop-zone {
         padding: 0;
         background: #ffffff;
         color: #000000;
+    }
+
+    /* Prism's dark theme would leave light tokens on a light page; force
+       monochrome code so highlighted blocks print legibly in any theme. */
+    pre[class*="language-"],
+    code[class*="language-"],
+    pre[class*="language-"] .token,
+    code[class*="language-"] .token {
+        color: #000000 !important;
+        text-shadow: none !important;
     }
 
     /* Avoid awkward page breaks inside grouped content */
